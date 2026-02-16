@@ -7,83 +7,165 @@ description: Spawn and manage fully-configured opencode CLI sessions via tmux-tt
 
 Bootstrap and launch opencode with full environment setup — skills from a git repo, config-cli auth, vault secrets, and opencode/oh-my-opencode installation — then control it through tmux-tty.
 
-## Workflow
+## CLI vs TUI Mode
+
+The script defaults to **CLI mode** (`opencode run --format json`) — non-interactive, one prompt per invocation, JSON events to stdout. This is the **preferred mode for tmux automation**: structured output, no TUI artifacts, and the script prints the session ID for precise continuation.
+
+Use `--tui` only when the user explicitly requests interactive exploration.
+
+| Mode | Command | Output | Session tracking |
+|------|---------|--------|------------------|
+| **CLI (default)** | `opencode run --format json` | JSON events + `[opencode-agent] session=<id>` | Caller captures ID, passes `-s <id>` |
+| **TUI** | `opencode` (with `--tui`) | TUI rendering | Manual |
+
+## Best Practice: Session Tracking with `-s`
+
+**ALWAYS use `-s <session-id>` for session continuity.** Never rely on `-c` (continue last) — it is ambiguous when multiple agents run in parallel.
+
+The script outputs `[opencode-agent] session=<id>` after every CLI run. The caller (e.g. Sisyphus via tmux) captures this ID from the output and passes it back on the next invocation.
+
+```
+1st run:  opencode-agent.sh "build the auth module"
+          → JSON output...
+          → [opencode-agent] session=ses_abc123
+
+2nd run:  opencode-agent.sh -s ses_abc123 "add rate limiting"
+          → continues the exact same session
+
+3rd run:  opencode-agent.sh -s ses_abc123 "write tests"
+          → still the same session
+```
+
+To extract the session ID from tmux capture output:
+```bash
+grep -o 'session=ses_[^ ]*' <<< "$CAPTURED_OUTPUT" | tail -1 | cut -d= -f2
+```
+
+## Workflow (CLI Mode — Recommended)
 
 ### 1. Create a tmux TTY session
 
-Use the tmux-tty skill to create an isolated session (local or remote):
-
 ```bash
-# Local
 <tmux-skill-path>/tmux-wrapper.sh start oc bash
 <tmux-skill-path>/tmux-wrapper.sh send oc 'cd /path/to/project' Enter
-
-# Remote (SSH)
-<tmux-skill-path>/tmux-wrapper.sh start oc-remote ssh user@host
-<tmux-skill-path>/tmux-wrapper.sh send oc-remote 'cd /path/to/project' Enter
 ```
 
-### 2. Run the bootstrap script
-
-Send the bootstrap command into the tmux session:
+### 2. Bootstrap + first prompt
 
 ```bash
 <tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opencode-agent.sh \
   --repo https://github.com/VincentHanxiaoDu/opendog \
-  --config-cli-endpoint "https://..." ' Enter
+  --config-cli-endpoint "https://..." \
+  "implement the login feature"' Enter
 ```
 
 The script will:
 1. Clone/pull the repo and merge `.opencode/skills/` into the project
-2. Install and authenticate config-cli
-3. Inject environment variables from the vault
-4. Install or update opencode and oh-my-opencode
-5. Launch opencode with `exec` (replaces shell process)
+2. Install and authenticate config-cli, inject env vars from vault
+3. Install or update opencode and oh-my-opencode
+4. Run `opencode run --format json "implement the login feature"`
+5. After completion, print `[opencode-agent] session=ses_xxx` and return to shell
 
-### 3. Authenticate (if needed)
-
-If opencode needs auth, quit and run it interactively:
+### 3. Capture output + session ID
 
 ```bash
-<tmux-skill-path>/tmux-wrapper.sh send oc '/exit' Enter
+sleep 30
+OUTPUT=$(<tmux-skill-path>/tmux-wrapper.sh capture oc)
+SID=$(echo "$OUTPUT" | grep -o 'session=ses_[^ ]*' | tail -1 | cut -d= -f2)
+```
+
+`$SID` now holds the session ID (e.g. `ses_abc123`). JSON events in `$OUTPUT` contain the full response.
+
+### 4. Continue the session
+
+Pass the captured session ID with `-s`:
+
+```bash
+<tmux-skill-path>/tmux-wrapper.sh send oc "opencode run --format json -s $SID \"add unit tests\"" Enter
+```
+
+Or via the bootstrap script (re-applies env setup):
+
+```bash
+<tmux-skill-path>/tmux-wrapper.sh send oc "bash <skill-path>/scripts/opencode-agent.sh \
+  -s $SID \"add unit tests\"" Enter
+```
+
+### 5. Cleanup
+
+```bash
+<tmux-skill-path>/tmux-wrapper.sh stop oc
+```
+
+No exit command needed — CLI mode runs to completion and returns to shell.
+
+## Workflow (TUI Mode)
+
+Use `--tui` to launch the interactive terminal UI.
+
+### Launch
+
+```bash
+<tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opencode-agent.sh \
+  --tui --repo https://github.com/VincentHanxiaoDu/opendog \
+  --config-cli-endpoint "https://..."' Enter
+```
+
+### Interact
+
+Send prompts into the TUI input area. **Important**: the prompt text is typed into the input field; you must send an extra `Enter` to submit:
+
+```bash
+<tmux-skill-path>/tmux-wrapper.sh send oc 'implement the login feature' Enter
+# The text is now in the input field — send Enter again to submit
 sleep 0.5
+<tmux-skill-path>/tmux-wrapper.sh send oc Enter
+```
+
+### Quit TUI
+
+**`/exit` does NOT work via tmux** — the `/` triggers a slash-command palette and `exit` gets fuzzy-matched to a wrong command (e.g. `Agent Entry Point`).
+
+Correct exit procedure:
+
+```bash
+# 1. Open command palette
+<tmux-skill-path>/tmux-wrapper.sh send oc C-p
+sleep 0.5
+
+# 2. Search for exit
+<tmux-skill-path>/tmux-wrapper.sh send oc 'exit'
+sleep 0.5
+
+# 3. Select "Exit the app"
+<tmux-skill-path>/tmux-wrapper.sh send oc Enter
+sleep 1
+
+# 4. Cleanup tmux session
+<tmux-skill-path>/tmux-wrapper.sh stop oc
+```
+
+If graceful exit fails, force-kill with `stop`:
+
+```bash
+<tmux-skill-path>/tmux-wrapper.sh stop oc
+```
+
+### Authenticate (if needed)
+
+If opencode needs auth, exit TUI first and run auth interactively:
+
+```bash
+# Exit TUI (use Ctrl+P method above), then:
 <tmux-skill-path>/tmux-wrapper.sh send oc 'opencode auth login' Enter
 sleep 2
 <tmux-skill-path>/tmux-wrapper.sh capture oc
 ```
 
-### 4. Interact with opencode
-
-Send prompts and capture output:
-
-```bash
-<tmux-skill-path>/tmux-wrapper.sh send oc 'implement the login feature' Enter
-sleep 3
-<tmux-skill-path>/tmux-wrapper.sh capture oc
-```
-
-### 5. Reload with session continuity
-
-Quit opencode and re-run the bootstrap with the session ID:
-
-```bash
-<tmux-skill-path>/tmux-wrapper.sh send oc '/exit' Enter
-sleep 0.5
-<tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opencode-agent.sh -s <session-id>' Enter
-```
-
-### 6. Quit and cleanup
-
-```bash
-<tmux-skill-path>/tmux-wrapper.sh send oc '/exit' Enter
-sleep 0.5
-<tmux-skill-path>/tmux-wrapper.sh stop oc
-```
-
 ## Script Arguments
 
 ```bash
-bash <skill-path>/scripts/opencode-agent.sh [options] [opencode-args...]
+bash <skill-path>/scripts/opencode-agent.sh [options] [prompt...]
 ```
 
 | Flag | Arg | Purpose |
@@ -94,7 +176,9 @@ bash <skill-path>/scripts/opencode-agent.sh [options] [opencode-args...]
 | `--config-cli-token` | `<token>` | Login with token |
 | `--graphiti-group-id` | `<id>` | Override GRAPHITI_GROUP_ID (default: opendog) |
 | `--graphiti-model` | `<model>` | Override MODEL_NAME for graphiti |
-| `-s, --session` | `<id>` | Continue specific opencode session |
+| `-s, --session` | `<id>` | Continue specific session (**preferred** for automation) |
+| `-c, --continue` | - | Continue the last session (unsafe with parallel agents) |
+| `--tui` | - | Launch interactive TUI instead of CLI mode |
 | `--log-level` | `<level>` | Override default DEBUG |
 | `-h, --help` | - | Show help (includes `opencode --help`) |
 
@@ -147,9 +231,12 @@ The bootstrap injects these from config-cli vault:
 
 ## Pitfalls
 
+- **Always use `-s <id>`, never `-c` for automation** — `-c` picks "last session" globally, which breaks with parallel agents
+- **Prefer CLI mode for automation** — structured JSON output, no TUI artifacts, no exit issues
 - **Always `sleep` after `send`** before `capture` — let commands initialize
 - **Always `stop` tmux sessions** when done — prevents orphaned sockets
 - **Secrets go through config-cli** — never pass secrets as plain arguments in shared environments
-- **`exec opencode`** replaces the shell — the tmux session becomes the opencode process
+- **`exec opencode`** replaces the shell — in TUI mode the tmux session becomes the opencode process
 - **First run needs `--repo`** — subsequent runs use the cached clone in `$TMPDIR`
-- **Session continuity** — use `-s <session-id>` to resume; omit to start fresh
+- **TUI `/exit` broken via tmux** — `/` triggers slash-command palette; use `Ctrl+P → exit → Enter` instead
+- **TUI prompt submission** — text typed via `send` lands in input field; needs an extra `Enter` to submit

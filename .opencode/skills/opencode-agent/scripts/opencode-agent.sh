@@ -16,14 +16,38 @@ GRAPHITI_GROUP_ID="opendog"
 GRAPHITI_MODEL=""
 SESSION_ID=""
 LOG_LEVEL="DEBUG"
+USE_TUI=false
+CONTINUE_LAST=false
 OPENCODE_EXTRA_ARGS=()
 
 # --- Help ---
 show_help() {
   cat <<'HELPEOF'
-Usage: opencode-agent.sh [options] [opencode-args...]
+Usage: opencode-agent.sh [options] [prompt...]
 
 Bootstrap and launch opencode with full environment and skills from a git repo.
+
+Mode:
+  By default, runs in CLI mode using `opencode run --format json` — non-interactive,
+  outputs JSON events to stdout. After completion, prints:
+    [opencode-agent] session=<session-id>
+  The caller captures this ID and passes -s <id> on the next run.
+
+  Use --tui to launch the interactive TUI instead.
+
+Session continuity:
+  1st run:  opencode-agent.sh "implement the login feature"
+            → outputs JSON + [opencode-agent] session=ses_abc123
+  2nd run:  opencode-agent.sh -s ses_abc123 "now add tests"
+            → continues the same session
+  Fresh:    opencode-agent.sh "unrelated task"
+            → new session, new ID
+
+Examples:
+  opencode-agent.sh --repo <url> "implement the login feature"
+  opencode-agent.sh -s ses_abc123 "now add tests for it"
+  opencode-agent.sh -c "continue whatever was last"
+  opencode-agent.sh --tui --repo <url>
 
 Options:
   --repo <url>                  Git repo URL with .opencode/skills/ (required first run)
@@ -33,12 +57,12 @@ Options:
   --graphiti-group-id <id>      Override graphiti group ID (default: opendog)
   --graphiti-model <model>      Override graphiti model
   -s, --session <id>            Continue specific opencode session
+  -c, --continue                Continue the last session
+  --tui                         Launch interactive TUI instead of CLI mode
   --log-level <level>           Log level for opencode (default: DEBUG)
   -h, --help                    Show this help
 
 All other arguments are passed through to opencode.
-
-Reload: quit opencode, then re-run with -s <session-id>
 
 === opencode help ===
 HELPEOF
@@ -62,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       GRAPHITI_MODEL="$2"; shift 2 ;;
     -s|--session)
       SESSION_ID="$2"; shift 2 ;;
+    -c|--continue)
+      CONTINUE_LAST=true; shift ;;
+    --tui)
+      USE_TUI=true; shift ;;
     --log-level)
       LOG_LEVEL="$2"; shift 2 ;;
     -h|--help)
@@ -224,11 +252,35 @@ if [[ -f "$OMO_SETUP" ]]; then
 fi
 
 # --- Step 8: Launch opencode ---
-echo "[opencode-agent] Launching opencode..."
 
-# Add session flag if provided
+SESSION_ARGS=()
 if [[ -n "$SESSION_ID" ]]; then
-  OPENCODE_EXTRA_ARGS=("-s" "$SESSION_ID" "${OPENCODE_EXTRA_ARGS[@]}")
+  SESSION_ARGS=("-s" "$SESSION_ID")
+elif [[ "$CONTINUE_LAST" = true ]]; then
+  SESSION_ARGS=("-c")
 fi
 
-exec opencode --log-level "$LOG_LEVEL" "${OPENCODE_EXTRA_ARGS[@]}"
+if [[ "$USE_TUI" = true ]]; then
+  echo "[opencode-agent] Launching opencode TUI..."
+  exec opencode --log-level "$LOG_LEVEL" \
+    ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
+    ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}
+else
+  echo "[opencode-agent] Running opencode CLI (session: ${SESSION_ARGS[*]:-new})..."
+
+  OUTPUT_FILE="${TMPDIR:-/tmp}/opencode-agent-output.$$"
+  trap 'rm -f "$OUTPUT_FILE"' EXIT
+
+  opencode run --format json --log-level "$LOG_LEVEL" \
+    ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
+    ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"} \
+    | tee "$OUTPUT_FILE"
+  OC_EXIT=${PIPESTATUS[0]}
+
+  CAPTURED_SID=$(grep -o '"sessionID":"[^"]*"' "$OUTPUT_FILE" | head -1 | cut -d'"' -f4)
+  if [[ -n "$CAPTURED_SID" ]]; then
+    echo "[opencode-agent] session=$CAPTURED_SID"
+  fi
+
+  exit "$OC_EXIT"
+fi
