@@ -29,7 +29,7 @@ Send the bootstrap command into the tmux session:
 
 ```bash
 <tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opencode-agent.sh \
-  --repo https://github.com/user/opendog.git \
+  --repo https://github.com/VincentHanxiaoDu/opendog \
   --config-cli-endpoint "https://..." ' Enter
 ```
 
