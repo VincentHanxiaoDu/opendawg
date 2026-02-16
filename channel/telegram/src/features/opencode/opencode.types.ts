@@ -1,5 +1,7 @@
-import type { Session } from "@opencode-ai/sdk";
+import type { Session } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
+
+export type VerbosityLevel = 0 | 1 | 2 | 3;
 
 export interface UserSession {
     userId: number;
@@ -8,5 +10,7 @@ export interface UserSession {
     createdAt: Date;
     chatId?: number;
     lastMessageId?: number;
-    currentAgent?: string; // Track the current agent for this session
+    currentAgent?: string;
+    verbosity: VerbosityLevel;
+    stream: boolean;
 }

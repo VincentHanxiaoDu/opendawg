@@ -1,4 +1,5 @@
 import { Bot, Context, InputFile, Keyboard } from "grammy";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import { OpenCodeService } from "./opencode.service.js";
 import { ConfigService } from "../../services/config.service.js";
 import { AccessControlMiddleware } from "../../middleware/access-control.middleware.js";
@@ -6,8 +7,13 @@ import { MessageUtils } from "../../utils/message.utils.js";
 import { ErrorUtils } from "../../utils/error.utils.js";
 import { formatAsHtml, escapeHtml } from "./event-handlers/utils.js";
 import { FileMentionService, FileMentionUI } from "../file-mentions/index.js";
+import { resetQuestionState, getQuestionCallback } from "./event-handlers/message-part-updated/tool-part.handler.js";
+import { getPermissionCallback } from "./event-handlers/permission.updated.handler.js";
 import * as fs from "fs";
 import * as path from "path";
+
+// Track pending custom question answers: userId -> { callId, qIdx }
+const pendingQuestionAnswers = new Map<number, { callId: string; qIdx: number }>();
 
 export class OpenCodeBot {
     private opencodeService: OpenCodeService;
@@ -44,6 +50,7 @@ export class OpenCodeBot {
         bot.command("sessions", AccessControlMiddleware.requireAccess, this.handleSessions.bind(this));
         bot.command("undo", AccessControlMiddleware.requireAccess, this.handleUndo.bind(this));
         bot.command("redo", AccessControlMiddleware.requireAccess, this.handleRedo.bind(this));
+        bot.command("verbosity", AccessControlMiddleware.requireAccess, this.handleVerbosity.bind(this));
         
         // Handle keyboard button presses
         bot.hears("⏹️ ESC", AccessControlMiddleware.requireAccess, this.handleEsc.bind(this));
@@ -52,6 +59,17 @@ export class OpenCodeBot {
         // Handle inline button callbacks
         bot.callbackQuery("esc", AccessControlMiddleware.requireAccess, this.handleEscButton.bind(this));
         bot.callbackQuery("tab", AccessControlMiddleware.requireAccess, this.handleTabButton.bind(this));
+
+        // Handle permission response buttons (short IDs like p0, p1, p2, ...)
+        // Handle question response buttons (short IDs like q0, q1, q2, ...)
+        bot.on("callback_query:data", AccessControlMiddleware.requireAccess, async (ctx) => {
+            const data = ctx.callbackQuery.data;
+            if (/^p\d+$/.test(data)) {
+                await this.handlePermissionResponse(ctx, data);
+            } else if (/^q\d+$/.test(data)) {
+                await this.handleQuestionResponse(ctx, data);
+            }
+        });
         
         // Handle file uploads (documents, photos, videos, audio, etc.)
         bot.on("message:document", AccessControlMiddleware.requireAccess, this.handleFileUpload.bind(this));
@@ -94,6 +112,7 @@ export class OpenCodeBot {
                 '/esc - Abort the current AI operation',
                 '/undo - Revert the last message/change',
                 '/redo - Restore a previously undone change',
+                '/verbosity [0-3] [0/1] - Set detail level &amp; streaming',
                 '⇥ TAB button - Cycle between agents (build ↔ plan)',
                 '⏹️ ESC button - Same as /esc command',
                 '',
@@ -243,6 +262,28 @@ export class OpenCodeBot {
                 return;
             }
 
+            // Check if this is a custom answer to a pending question
+            const pendingQuestion = pendingQuestionAnswers.get(userId);
+            if (pendingQuestion) {
+                pendingQuestionAnswers.delete(userId);
+                try {
+                    const baseUrl = process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
+                    const res = await fetch(`${baseUrl}/question/${pendingQuestion.callId}/reply`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ answers: [[promptText]] }),
+                    });
+                    if (res.ok) {
+                        await ctx.reply(`✅ Answer sent: <b>${escapeHtml(promptText)}</b>`, { parse_mode: "HTML" });
+                    } else {
+                        await ctx.reply("❌ Failed to send answer");
+                    }
+                } catch (error) {
+                    await ctx.reply("❌ Failed to send answer");
+                }
+                return;
+            }
+
             // Check for file mentions
             const mentions = this.fileMentionService.parseMentions(promptText);
             
@@ -300,29 +341,9 @@ export class OpenCodeBot {
 
     private async sendPromptToOpenCode(ctx: Context, userId: number, promptText: string, fileContext?: string): Promise<void> {
         try {
-            const response = await this.opencodeService.sendPrompt(userId, promptText, fileContext);
-
-            // Only send as file if response is very long (300+ lines)
-            const hasManyLines = response.split('\n').length > 300;
-
-            if (hasManyLines) {
-                // Send as markdown file
-                const buffer = Buffer.from(response, 'utf-8');
-                await ctx.replyWithDocument(new InputFile(buffer, "response.md"));
-                return;
-            }
-
-            // Split response if it's too long (Telegram has a 4096 character limit)
-            const maxLength = 4000;
-            if (response.length <= maxLength) {
-                await ctx.reply(formatAsHtml(response), { parse_mode: "HTML" });
-            } else {
-                const chunks = this.splitIntoChunks(response, maxLength);
-                for (const chunk of chunks) {
-                    await ctx.reply(formatAsHtml(chunk), { parse_mode: "HTML" });
-                }
-            }
-
+            // Fire the prompt — response is delivered via SSE event stream,
+            // not from this call. sendPrompt is fire-and-forget.
+            await this.opencodeService.sendPrompt(userId, promptText, fileContext);
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("send prompt to OpenCode", error));
         }
@@ -486,6 +507,111 @@ export class OpenCodeBot {
         } catch (error) {
             await ctx.answerCallbackQuery("Error handling TAB");
             console.error("Error in handleTabButton:", error);
+        }
+    }
+
+    private async handlePermissionResponse(ctx: Context, shortId: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+
+            // Look up the short ID from the callback map
+            const cbData = getPermissionCallback(shortId);
+            if (!cbData) {
+                await ctx.editMessageText("❌ Permission expired. Please try again.");
+                return;
+            }
+
+            const { permissionID, reply } = cbData;
+
+            const baseUrl = process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
+            const client = createOpencodeClient({ baseUrl });
+
+            await client.permission.reply({
+                requestID: permissionID,
+                reply: reply as "once" | "always" | "reject",
+            });
+
+            const labels: Record<string, string> = {
+                once: "✅ Allowed (once)",
+                always: "✅ Allowed (always)",
+                reject: "❌ Denied",
+            };
+
+            // Update the message to show the result and remove buttons
+            await ctx.editMessageText(
+                `${ctx.callbackQuery?.message?.text || "Permission"}\n\n${labels[reply]}`,
+                { parse_mode: "HTML" }
+            );
+        } catch (error) {
+            console.error("Error handling permission response:", error);
+            try {
+                await ctx.editMessageText("❌ Failed to respond to permission request");
+            } catch {}
+        }
+    }
+
+    private async handleQuestionResponse(ctx: Context, shortId: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+
+            // Look up the short ID from the callback map
+            const cbData = getQuestionCallback(shortId);
+            if (!cbData) {
+                await ctx.editMessageText("❌ Question expired. Please try again.");
+                resetQuestionState();
+                return;
+            }
+
+            const { sessionID, callID, qIdx, action, label } = cbData;
+            const baseUrl = process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
+
+            if (action === "skip") {
+                const res = await fetch(`${baseUrl}/question/${callID}/reject`, { method: "POST" });
+                if (!res.ok) {
+                    console.log("Question reject failed:", res.status);
+                }
+                await ctx.editMessageText("⏭ Question skipped");
+                resetQuestionState();
+                return;
+            }
+
+            if (action === "custom") {
+                await ctx.editMessageText(
+                    `${ctx.callbackQuery?.message?.text || ""}\n\n✍️ Type your answer and send it as a message.`,
+                    { parse_mode: "HTML" }
+                );
+                const userId = ctx.from?.id;
+                if (userId) {
+                    pendingQuestionAnswers.set(userId, { callId: callID, qIdx });
+                }
+                resetQuestionState();
+                return;
+            }
+
+            // Regular option selected — use the label stored in the callback map
+            const selectedLabel = label || `Option ${parseInt(action, 10) + 1}`;
+
+            const res = await fetch(`${baseUrl}/question/${callID}/reply`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ answers: [[selectedLabel]] }),
+            });
+
+            if (!res.ok) {
+                console.log("Question reply failed:", res.status, await res.text());
+            }
+
+            await ctx.editMessageText(
+                `${ctx.callbackQuery?.message?.text || ""}\n\n✅ Selected: <b>${escapeHtml(selectedLabel)}</b>`,
+                { parse_mode: "HTML" }
+            );
+            resetQuestionState();
+        } catch (error) {
+            console.error("Error handling question response:", error);
+            try {
+                await ctx.editMessageText("❌ Failed to respond to question");
+            } catch {}
+            resetQuestionState();
         }
     }
 
@@ -659,6 +785,59 @@ export class OpenCodeBot {
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("redo", error));
         }
+    }
+
+    private async handleVerbosity(ctx: Context): Promise<void> {
+        const userId = ctx.from?.id;
+        if (!userId) return;
+
+        const userSession = this.opencodeService.getUserSession(userId);
+        if (!userSession) {
+            await ctx.reply("❌ No active session. Use /opencode first.");
+            return;
+        }
+
+        const text = ctx.message?.text || "";
+        const args = text.replace("/verbosity", "").trim().split(/\s+/);
+
+        if (args[0] === "" || args[0] === undefined) {
+            const levels = [
+                "0 = quiet (final text only)",
+                "1 = normal (+ tool names, thinking indicator)",
+                "2 = verbose (+ tool args, persistent indicators)",
+                "3 = debug (+ tool output, full detail)",
+            ];
+            const msg = [
+                `📊 <b>Verbosity:</b> ${userSession.verbosity}`,
+                `📡 <b>Stream:</b> ${userSession.stream ? "on" : "off"}`,
+                "",
+                `<b>Levels:</b>`,
+                ...levels,
+                "",
+                `Usage: /verbosity [0-3] [stream:0/1]`,
+            ].join("\n");
+            const m = await ctx.reply(msg, { parse_mode: "HTML" });
+            await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+            return;
+        }
+
+        const level = parseInt(args[0], 10);
+        if (isNaN(level) || level < 0 || level > 3) {
+            await ctx.reply("❌ Level must be 0-3");
+            return;
+        }
+
+        userSession.verbosity = level as 0 | 1 | 2 | 3;
+
+        if (args[1] !== undefined) {
+            userSession.stream = args[1] === "1";
+        }
+
+        const m = await ctx.reply(
+            `✅ Verbosity: <b>${userSession.verbosity}</b> | Stream: <b>${userSession.stream ? "on" : "off"}</b>`,
+            { parse_mode: "HTML" }
+        );
+        await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
     }
 
     private async handleFileUpload(ctx: Context): Promise<void> {

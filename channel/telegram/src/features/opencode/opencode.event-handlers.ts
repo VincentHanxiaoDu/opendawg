@@ -1,4 +1,4 @@
-import type { Event } from "@opencode-ai/sdk";
+import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "./opencode.types.js";
 
@@ -65,6 +65,7 @@ export const eventHandlers: EventHandlerMap = {
     "message.part.updated": messagePartUpdated,
     "message.part.removed": messagePartRemoved,
     "permission.updated": permissionUpdated,
+    "permission.asked": permissionUpdated as any,  // v2 event name
     "permission.replied": permissionReplied,
     "session.status": sessionStatus,
     "session.idle": sessionIdle,

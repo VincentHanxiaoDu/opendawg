@@ -1,4 +1,4 @@
-import type { Event } from "@opencode-ai/sdk";
+import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
 import { handleTextPart } from "./message-part-updated/text-part.handler.js";
@@ -15,24 +15,21 @@ export default async function messagePartUpdatedHandler(
     try {
         const { part } = event.properties;
         
-        // Handle reasoning parts separately
         if (part.type === "reasoning") {
-            await handleReasoningPart(ctx);
+            await handleReasoningPart(ctx, userSession);
             return null;
         }
         
-        // Handle tool calls separately
         if (part.type === "tool") {
-            await handleToolPart(ctx, part);
+            await handleToolPart(ctx, part, userSession);
             return null;
         }
         
-        // Only process text parts
         if (part.type !== "text") {
             return null;
         }
 
-        await handleTextPart(ctx, part.text);
+        await handleTextPart(ctx, part.text, userSession);
 
     } catch (error) {
         console.log("Error in message.part.updated handler:", error);

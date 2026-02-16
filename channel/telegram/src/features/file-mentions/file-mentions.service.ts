@@ -2,7 +2,7 @@
  * Service for handling file mentions using OpenCode find.files API
  */
 
-import { createOpencodeClient } from "@opencode-ai/sdk";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import type { FileMention, FileMatch, ResolvedMention, FileMentionConfig } from "./file-mentions.types.js";
 import { FileMentionParser } from "./file-mentions.parser.js";
 
@@ -39,11 +39,9 @@ export class FileMentionService {
         
         try {
             const result = await client.find.files({
-                query: {
-                    query,
-                    directory,
-                    dirs: "false" // Only files, not directories
-                }
+                query,
+                directory,
+                dirs: "false",
             });
             
             if (!result.data) {
@@ -88,7 +86,7 @@ export class FileMentionService {
         
         try {
             const result = await client.file.read({
-                query: { path }
+                path,
             });
             
             if (!result.data) {

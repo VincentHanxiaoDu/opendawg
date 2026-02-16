@@ -1,33 +1,36 @@
 import type { Context } from "grammy";
+import type { UserSession } from "../../opencode.types.js";
 
 let reasoningMessageId: number | null = null;
 let reasoningDeleteTimeout: NodeJS.Timeout | null = null;
 
-export async function handleReasoningPart(ctx: Context): Promise<void> {
+export async function handleReasoningPart(ctx: Context, userSession: UserSession): Promise<void> {
     try {
-        // Clear existing reasoning delete timeout
+        const { verbosity, stream } = userSession;
+
+        if (verbosity < 1 && !stream) return;
+
         if (reasoningDeleteTimeout) {
             clearTimeout(reasoningDeleteTimeout);
             reasoningDeleteTimeout = null;
         }
 
         if (!reasoningMessageId) {
-            // Send reasoning message with prefix
             const sentMessage = await ctx.reply("[Thinking] 💭");
             reasoningMessageId = sentMessage.message_id;
         }
 
-        // Set timeout to delete message after 2.5 seconds (half of 5 seconds)
-        reasoningDeleteTimeout = setTimeout(async () => {
-            try {
-                if (reasoningMessageId) {
-                    await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
-                    reasoningMessageId = null;
-                }
-            } catch (error) {
-                console.log("Error deleting reasoning message:", error);
-            }
-        }, 2500);
+        const shouldAutoDelete = verbosity < 3;
+        if (shouldAutoDelete) {
+            reasoningDeleteTimeout = setTimeout(async () => {
+                try {
+                    if (reasoningMessageId) {
+                        await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
+                        reasoningMessageId = null;
+                    }
+                } catch {}
+            }, 2500);
+        }
 
     } catch (error) {
         console.log("Error in reasoning part handler:", error);

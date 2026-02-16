@@ -1,5 +1,5 @@
-import { createOpencodeClient } from "@opencode-ai/sdk";
-import type { Event } from "@opencode-ai/sdk";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2";
+import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "./opencode.types.js";
 import { processEvent } from "./opencode.event-handlers.js";
@@ -18,7 +18,7 @@ export class OpenCodeService {
 
         try {
             const result = await client.session.create({
-                body: { title: title || `Telegram Session ${new Date().toISOString()}` },
+                title: title || `Telegram Session ${new Date().toISOString()}`,
             });
 
             if (!result.data) {
@@ -31,6 +31,8 @@ export class OpenCodeService {
                 session: result.data,
                 createdAt: new Date(),
                 currentAgent: "build",
+                verbosity: 1,
+                stream: true,
             };
 
             this.userSessions.set(userId, userSession);
@@ -96,7 +98,7 @@ export class OpenCodeService {
         }
     }
 
-    async sendPrompt(userId: number, text: string, fileContext?: string): Promise<string> {
+    async sendPrompt(userId: number, text: string, fileContext?: string): Promise<void> {
         const userSession = this.getUserSession(userId);
 
         if (!userSession) {
@@ -105,36 +107,25 @@ export class OpenCodeService {
 
         const client = createOpencodeClient({ baseUrl: this.baseUrl });
 
-        try {
-            // Prepend file context if provided
-            const fullPrompt = fileContext ? `${fileContext}\n\n${text}` : text;
-            
-            const result = await client.session.prompt({
-                path: { id: userSession.sessionId },
-                body: {
-                    parts: [{ type: "text", text: fullPrompt }],
-                    agent: userSession.currentAgent,
-                },
-            });
+        // Prepend file context if provided
+        const fullPrompt = fileContext ? `${fileContext}\n\n${text}` : text;
 
-            if (!result.data) {
-                throw new Error("Failed to send prompt");
-            }
-
-            // Extract text from response parts
-            const textParts = result.data.parts
-                ?.filter((part) => part.type === "text")
-                .map((part) => part.text)
-                .join("\n");
-
-            return textParts || "No response received";
-        } catch (error) {
-            // Provide more helpful error message for connection failures
+        // Fire the prompt without awaiting the full response.
+        // The SSE event stream handles delivering all response parts
+        // (text, tool calls, questions, etc.) to the user in real-time.
+        client.session.prompt({
+            sessionID: userSession.sessionId,
+            parts: [{ type: "text", text: fullPrompt }],
+            agent: userSession.currentAgent,
+        }).catch((error) => {
+            // Log connection errors but don't throw — the SSE stream
+            // will show errors via session.error events
             if (error instanceof Error && (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED'))) {
-                throw new Error(`Cannot connect to OpenCode server at ${this.baseUrl}. Please ensure the OpenCode server is running.`);
+                console.error(`Cannot connect to OpenCode server at ${this.baseUrl}`);
+            } else {
+                console.error("Prompt error:", error);
             }
-            throw error;
-        }
+        });
     }
 
     async deleteSession(userId: number): Promise<boolean> {
@@ -151,7 +142,7 @@ export class OpenCodeService {
 
         try {
             await client.session.delete({
-                path: { id: userSession.sessionId },
+                sessionID: userSession.sessionId,
             });
             this.userSessions.delete(userId);
             return true;
@@ -176,7 +167,7 @@ export class OpenCodeService {
 
         try {
             await client.session.abort({
-                path: { id: userSession.sessionId },
+                sessionID: userSession.sessionId,
             });
             return true;
         } catch (error) {
@@ -290,8 +281,8 @@ export class OpenCodeService {
 
         try {
             await client.session.update({
-                path: { id: userSession.sessionId },
-                body: { title }
+                sessionID: userSession.sessionId,
+                title,
             });
 
             console.log(`✓ Updated session title for user ${userId}: "${title}"`);
@@ -364,7 +355,7 @@ export class OpenCodeService {
             }
 
             await client.session.revert({
-                path: { id: userSession.sessionId }
+                sessionID: userSession.sessionId,
             });
 
             console.log(`✓ Undid last message for user ${userId}`);
@@ -391,7 +382,7 @@ export class OpenCodeService {
             }
 
             await client.session.unrevert({
-                path: { id: userSession.sessionId }
+                sessionID: userSession.sessionId,
             });
 
             console.log(`✓ Redid last message for user ${userId}`);

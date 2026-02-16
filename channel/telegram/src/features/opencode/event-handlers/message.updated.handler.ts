@@ -1,5 +1,5 @@
-import type { Event } from "@opencode-ai/sdk";
-import { createOpencodeClient } from "@opencode-ai/sdk";
+import type { Event } from "@opencode-ai/sdk/v2";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
 import { sendAndAutoDelete } from "./utils.js";
@@ -19,13 +19,13 @@ export default async function messageUpdatedHandler(
             const title = info.summary.title;
             
             // Update the session title using OpenCode SDK
-            const client = createOpencodeClient({ 
-                baseUrl: process.env.OPENCODE_BASE_URL || "http://localhost:4000" 
+            const client = createOpencodeClient({
+                baseUrl: process.env.OPENCODE_SERVER_URL || "http://localhost:4096"
             });
             
             await client.session.update({
-                path: { id: userSession.sessionId },
-                body: { title }
+                sessionID: userSession.sessionId,
+                title,
             });
             
             console.log(`✓ Updated session title: "${title}"`);

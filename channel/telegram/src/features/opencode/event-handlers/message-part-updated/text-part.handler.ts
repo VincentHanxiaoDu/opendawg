@@ -1,43 +1,42 @@
 import type { Context } from "grammy";
+import type { UserSession } from "../../opencode.types.js";
 import { formatAsHtml } from "../utils.js";
 
 let updateMessageId: number | null = null;
 let lastUpdateTime = 0;
-let deleteTimeout: NodeJS.Timeout | null = null;
-let latestText = "";
+let finalizeTimeout: NodeJS.Timeout | null = null;
+let latestFullText = "";
 
-export async function handleTextPart(ctx: Context, text: string): Promise<void> {
+export async function handleTextPart(ctx: Context, text: string, userSession?: UserSession): Promise<void> {
     try {
         const now = Date.now();
         
-        // Clear existing delete timeout
-        if (deleteTimeout) {
-            clearTimeout(deleteTimeout);
-            deleteTimeout = null;
+        if (finalizeTimeout) {
+            clearTimeout(finalizeTimeout);
+            finalizeTimeout = null;
         }
 
-        // Limit to last 50 lines to prevent Telegram message size issues
+        latestFullText = text;
+
+        // Limit to last 50 lines during streaming to avoid Telegram 4096-char limit
         const lines = text.split('\n');
         const limitedText = lines.length > 50 
             ? lines.slice(-50).join('\n')
             : text;
 
-        // Store the latest text (formatted as HTML) with streaming prefix
-        latestText = `[Streaming] ✍️\n${formatAsHtml(limitedText)}`;
+        const streamingText = `[Streaming] ✍️\n${formatAsHtml(limitedText)}`;
 
         if (!updateMessageId) {
             // First message - send new message
-            const sentMessage = await ctx.reply(latestText, { parse_mode: "HTML" });
+            const sentMessage = await ctx.reply(streamingText, { parse_mode: "HTML" });
             updateMessageId = sentMessage.message_id;
-            lastUpdateTime = now; // Set time AFTER sending
+            lastUpdateTime = now;
         } else {
             // Throttle: Check if 2 seconds have passed since last update
             const timeSinceLastUpdate = now - lastUpdateTime;
             if (timeSinceLastUpdate < 2000) {
-                // Skip this update (text is stored in latestText for later)
-                // Set timeout to delete after 5 seconds of no new updates
-                deleteTimeout = setTimeout(() => {
-                    deleteTextMessage(ctx);
+                finalizeTimeout = setTimeout(() => {
+                    finalizeTextMessage(ctx);
                 }, 5000);
                 return;
             }
@@ -46,15 +45,14 @@ export async function handleTextPart(ctx: Context, text: string): Promise<void> 
             await ctx.api.editMessageText(
                 ctx.chat!.id,
                 updateMessageId,
-                latestText,
+                streamingText,
                 { parse_mode: "HTML" }
             );
-            lastUpdateTime = now; // Update time AFTER sending
+            lastUpdateTime = now;
         }
 
-        // Set timeout to delete message after 5 seconds of no updates
-        deleteTimeout = setTimeout(() => {
-            deleteTextMessage(ctx);
+        finalizeTimeout = setTimeout(() => {
+            finalizeTextMessage(ctx);
         }, 5000);
 
     } catch (error) {
@@ -62,13 +60,35 @@ export async function handleTextPart(ctx: Context, text: string): Promise<void> 
     }
 }
 
-async function deleteTextMessage(ctx: Context): Promise<void> {
+async function finalizeTextMessage(ctx: Context): Promise<void> {
+    const msgId = updateMessageId;
+    const savedText = latestFullText;
+    updateMessageId = null;
+    latestFullText = "";
+
+    if (!msgId) return;
+
     try {
-        if (updateMessageId) {
-            await ctx.api.deleteMessage(ctx.chat!.id, updateMessageId);
-            updateMessageId = null;
+        let finalText = savedText;
+        if (finalText.length > 4000) {
+            finalText = '… (truncated)\n' + finalText.split('\n').slice(-50).join('\n');
+            if (finalText.length > 4000) {
+                finalText = finalText.slice(-4000);
+            }
         }
-    } catch (error) {
-        console.log("Error deleting text message:", error);
+
+        if (!finalText.trim()) {
+            await ctx.api.deleteMessage(ctx.chat!.id, msgId);
+            return;
+        }
+
+        await ctx.api.editMessageText(
+            ctx.chat!.id,
+            msgId,
+            formatAsHtml(finalText),
+            { parse_mode: "HTML" }
+        );
+    } catch {
+        try { await ctx.api.deleteMessage(ctx.chat!.id, msgId); } catch {}
     }
 }
