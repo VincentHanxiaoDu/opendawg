@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="${SCRIPT_DIR}/../docker"
-MCP_ENDPOINT="http://localhost:8000/mcp/"
+MCP_ENDPOINT="http://localhost:8000/mcp"
 HEALTH_ENDPOINT="http://localhost:8000/health"
 GROUP_ID="${GRAPHITI_GROUP_ID:-opendog}"
 
@@ -101,18 +101,24 @@ cmd_status() {
 cmd_search() {
   local query="${1:?Error: Query required. Usage: graphiti-cli search <query>}"
   check_prereq mcp
+  check_prereq jq
 
-  mcp call search_facts --params "$(printf '{"query":"%s","group_ids":["%s"]}' \
-    "$(echo "$query" | sed 's/"/\\"/g')" "$GROUP_ID")" \
+  local query_escaped
+  query_escaped="$(printf '%s' "$query" | jq -Rs .)"
+
+  mcp call search_memory_facts --params "{\"query\":${query_escaped},\"group_ids\":[\"${GROUP_ID}\"]}" \
     "$MCP_ENDPOINT"
 }
 
 cmd_search_nodes() {
   local query="${1:?Error: Query required. Usage: graphiti-cli search-nodes <query>}"
   check_prereq mcp
+  check_prereq jq
 
-  mcp call search_nodes --params "$(printf '{"query":"%s","group_ids":["%s"]}' \
-    "$(echo "$query" | sed 's/"/\\"/g')" "$GROUP_ID")" \
+  local query_escaped
+  query_escaped="$(printf '%s' "$query" | jq -Rs .)"
+
+  mcp call search_nodes --params "{\"query\":${query_escaped},\"group_ids\":[\"${GROUP_ID}\"]}" \
     "$MCP_ENDPOINT"
 }
 
@@ -196,7 +202,7 @@ ${pair}"
   local name_escaped
   name_escaped="$(printf '%s' "$episode_name" | sed 's/"/\\"/g')"
 
-  mcp call add_episode --params "{\"name\":\"${name_escaped}\",\"episode_body\":${body_escaped},\"group_id\":\"${GROUP_ID}\"}" \
+  mcp call add_memory --params "{\"name\":\"${name_escaped}\",\"episode_body\":${body_escaped},\"group_id\":\"${GROUP_ID}\",\"source\":\"text\",\"source_description\":\"${source}\"}" \
     "$MCP_ENDPOINT"
 }
 
@@ -218,7 +224,7 @@ cmd_episodes() {
     esac
   done
 
-  mcp call get_episodes --params "{\"group_id\":\"${GROUP_ID}\",\"last_n\":${last_n}}" \
+  mcp call get_episodes --params "{\"group_ids\":[\"${GROUP_ID}\"],\"max_episodes\":${last_n}}" \
     "$MCP_ENDPOINT"
 }
 

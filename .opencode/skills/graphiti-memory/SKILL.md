@@ -56,8 +56,10 @@ All sensitive values MUST be injected via `$(config-cli get <key>)`. Never pass 
 For advanced usage or direct tool access, use `mcp call` via the mcp-cli skill:
 
 ```bash
-mcp call search_facts --params '{"query":"auth","group_ids":["opendog"]}' http://localhost:8000/mcp/
-mcp call add_episode --params '{"name":"ep1","episode_body":"fact","group_id":"opendog"}' http://localhost:8000/mcp/
+mcp call search_memory_facts --params '{"query":"auth","group_ids":["opendog"]}' http://localhost:8000/mcp
+mcp call add_memory --params '{"name":"ep1","episode_body":"fact","group_id":"opendog"}' http://localhost:8000/mcp
+mcp call search_nodes --params '{"query":"auth","group_ids":["opendog"]}' http://localhost:8000/mcp
+mcp call get_episodes --params '{"group_ids":["opendog"],"max_episodes":10}' http://localhost:8000/mcp
 ```
 
 ## Prerequisites
