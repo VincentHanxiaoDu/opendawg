@@ -1,5 +1,8 @@
 services:
-  # --- Graphiti Knowledge Graph (long-term memory) ---
+  # ============================================================
+  # Graphiti — Knowledge Graph (long-term memory)
+  #   Activated by: --graphiti or --start-all
+  # ============================================================
   neo4j:
     image: neo4j:5.26.2
     ports:
@@ -9,6 +12,8 @@ services:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-graphiti}
     volumes:
       - neo4j_data:/data
+    profiles:
+      - graphiti
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:7474"]
       interval: 10s
@@ -36,6 +41,8 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-graphiti}
     volumes:
       - ./graphiti-config.yaml:/app/mcp/config/config.yaml:ro
+    profiles:
+      - graphiti
     depends_on:
       neo4j:
         condition: service_healthy
@@ -47,7 +54,10 @@ services:
       start_period: 15s
     restart: on-failure
 
-  # --- Config-CLI vault (serves secrets via HTTP for remote agents) ---
+  # ============================================================
+  # Config-CLI — Vault (serves secrets via HTTP for remote agents)
+  #   Activated by: --config-cli or --start-all
+  # ============================================================
   config-cli:
     build:
       context: .
@@ -59,12 +69,33 @@ services:
       - CONFIG_CLI_PORT=9100
     volumes:
       - config_vault:/data/vault
+    profiles:
+      - config-cli
     healthcheck:
       test: ["CMD", "bash", "-c", "echo -e 'GET /health HTTP/1.0\r\n\r\n' | socat - TCP:localhost:9100 | grep -q ok"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 10s
+    restart: on-failure
+
+  # ============================================================
+  # Channel — Telegram (opencode-telegram, pure client)
+  #   Activated by: --channel=telegram or --start-all
+  # ============================================================
+  channel-telegram:
+    build:
+      context: .
+      dockerfile: Dockerfile.channel-telegram
+    environment:
+      # Map our env var names → telegramcoder expected names
+      - TELEGRAM_BOT_TOKENS=${TELEGRAM_BOT_TOKEN}
+      - ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
+      - ADMIN_USER_ID=${ADMIN_USER_ID:-}
+      - MESSAGE_DELETE_TIMEOUT=${TELEGRAM_MESSAGE_DELETE_TIMEOUT:-0}
+      - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://host.docker.internal:4096}
+    profiles:
+      - telegram
     restart: on-failure
 
 volumes:

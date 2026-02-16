@@ -1,0 +1,20 @@
+# Environment & secrets
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+dist/
+
+# OpenDog local state
+.opendog/
+
+# Claude Code
+.claude/
+
+# Docker
+*.log

@@ -20,6 +20,9 @@ SERVER_HOSTNAME="127.0.0.1"
 SERVER_CORS=()
 SERVER_PASSWORD=""
 ENV_FILE=""
+CHANNEL=""
+START_GRAPHITI=false
+START_CONFIG_CLI=false
 OPENCODE_EXTRA_ARGS=()
 
 # --- Help ---
@@ -44,6 +47,19 @@ Server Options:
   --hostname <addr>             Hostname/address to bind (default: 127.0.0.1)
   --cors <origin>               Allowed CORS origin (can be repeated)
   --password <pass>             Enable HTTP Basic Auth (username: opencode)
+
+Docker Service Options:
+  --config-cli                  Start config-cli vault (Docker)
+  --graphiti                    Start graphiti + neo4j knowledge graph (Docker)
+  --channel <name>              Start a channel (Docker). Supported: telegram
+  --start-all                   Start all Docker services above
+
+  Each service must pass its health check before opencode serve starts.
+  On Docker failure the script exits immediately.
+
+  Telegram env vars (see .env.example):
+    TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS,
+    ADMIN_USER_ID, TELEGRAM_MESSAGE_DELETE_TIMEOUT
 
 General:
   -h, --help                    Show this help
@@ -82,6 +98,16 @@ while [[ $# -gt 0 ]]; do
       SERVER_CORS+=("$2"); shift 2 ;;
     --password)
       SERVER_PASSWORD="$2"; shift 2 ;;
+    --channel)
+      CHANNEL="$2"; shift 2 ;;
+    --channel=*)
+      CHANNEL="${1#--channel=}"; shift ;;
+    --graphiti)
+      START_GRAPHITI=true; shift ;;
+    --config-cli)
+      START_CONFIG_CLI=true; shift ;;
+    --start-all)
+      START_CONFIG_CLI=true; START_GRAPHITI=true; CHANNEL="${CHANNEL:-telegram}"; shift ;;
     -h|--help)
       show_help; exit 0 ;;
     *)
@@ -274,4 +300,82 @@ fi
 
 cd "$SERVE_DIR"
 export OPENCODE_CONFIG_DIR="$PROJECT_ROOT/.opencode"
+
+# --- Docker service helpers ---
+COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
+DOCKER_PROFILES=()          # profiles to activate
+NEEDS_DOCKER=false          # true if any Docker service was requested
+
+docker_up() {
+  # Start services for the given profiles and wait for health checks.
+  # Exits the script on failure.
+  local profiles=("$@")
+  local profile_args=()
+  for p in "${profiles[@]}"; do
+    profile_args+=("--profile" "$p")
+  done
+
+  echo "[opencode-server] docker compose up ${profiles[*]} ..."
+  if ! docker compose -f "$COMPOSE_FILE" "${profile_args[@]}" up -d --wait; then
+    echo "[opencode-server] ERROR: Docker services failed to start — aborting"
+    docker compose -f "$COMPOSE_FILE" "${profile_args[@]}" logs --tail 40
+    exit 1
+  fi
+  echo "[opencode-server] Docker services [${profiles[*]}] are healthy"
+}
+
+# Validate channel name early
+if [[ -n "$CHANNEL" ]]; then
+  case "$CHANNEL" in
+    telegram)
+      if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+        echo "[opencode-server] ERROR: --channel=telegram requires TELEGRAM_BOT_TOKEN in .env"
+        exit 1
+      fi
+      ;;
+    *)
+      echo "[opencode-server] ERROR: unknown channel '$CHANNEL' (supported: telegram)"
+      exit 1
+      ;;
+  esac
+fi
+
+# --- Step 8a: Start all Docker services (before opencode serve) ---
+# Collect all requested profiles. Every service must be healthy before
+# opencode serve starts.
+DOCKER_PROFILES=()
+
+if [[ "$START_CONFIG_CLI" = true ]]; then
+  DOCKER_PROFILES+=(config-cli)
+  NEEDS_DOCKER=true
+fi
+
+if [[ "$START_GRAPHITI" = true ]]; then
+  DOCKER_PROFILES+=(graphiti)
+  NEEDS_DOCKER=true
+fi
+
+if [[ -n "$CHANNEL" ]]; then
+  DOCKER_PROFILES+=("$CHANNEL")
+  NEEDS_DOCKER=true
+fi
+
+# Verify docker is available when any service is requested
+if [[ "$NEEDS_DOCKER" = true ]]; then
+  if ! command -v docker &>/dev/null; then
+    echo "[opencode-server] ERROR: docker not found — required for --config-cli / --graphiti / --channel"
+    exit 1
+  fi
+  if ! docker compose version &>/dev/null; then
+    echo "[opencode-server] ERROR: docker compose plugin not found"
+    exit 1
+  fi
+fi
+
+# Start all Docker services and block until every one is healthy
+if [[ ${#DOCKER_PROFILES[@]} -gt 0 ]]; then
+  docker_up "${DOCKER_PROFILES[@]}"
+fi
+
+# --- Step 8b: Launch opencode serve ---
 exec opencode serve "${SERVE_ARGS[@]}" ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}
