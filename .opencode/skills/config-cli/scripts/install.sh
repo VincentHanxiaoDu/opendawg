@@ -18,10 +18,13 @@ chmod 700 "$VAULT_DIR"
 # Create bin directory
 mkdir -p "$BIN_DIR"
 
-# Make script executable and symlink
-chmod +x "${SCRIPT_DIR}/config-cli.sh"
-ln -sf "${SCRIPT_DIR}/config-cli.sh" "${BIN_DIR}/config-cli"
-echo "Symlinked config-cli → ${BIN_DIR}/config-cli"
+# Create wrapper script (avoids symlink to +x file which triggers macOS XProtect)
+cat > "${BIN_DIR}/config-cli" <<WRAPPER
+#!/usr/bin/env bash
+exec bash "${SCRIPT_DIR}/config-cli.sh" "\$@"
+WRAPPER
+chmod +x "${BIN_DIR}/config-cli"
+echo "Installed config-cli → ${BIN_DIR}/config-cli"
 
 # Check PATH
 if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
