@@ -247,7 +247,7 @@ echo "[opencode-server] Skipping oh-my-opencode — not applicable in server mod
 
 # --- Step 8: Launch opencode serve ---
 # Use a dedicated working directory so opencode's file operations are isolated
-SERVE_DIR="${PROJECT_ROOT}/opencode-server"
+SERVE_DIR="${PROJECT_ROOT}"
 mkdir -p "$SERVE_DIR"
 
 echo "[opencode-server] Launching opencode serve on ${SERVER_HOSTNAME}:${SERVER_PORT}..."
@@ -260,7 +260,7 @@ SERVE_ARGS=(
   "--log-level" "$LOG_LEVEL"
 )
 
-for origin in "${SERVER_CORS[@]}"; do
+for origin in "${SERVER_CORS[@]+"${SERVER_CORS[@]}"}"; do
   SERVE_ARGS+=("--cors" "$origin")
 done
 
@@ -273,4 +273,5 @@ elif [[ -n "${OPENCODE_SERVER_PASSWORD:-}" ]]; then
 fi
 
 cd "$SERVE_DIR"
-exec opencode serve "${SERVE_ARGS[@]}" "${OPENCODE_EXTRA_ARGS[@]}"
+export OPENCODE_CONFIG_DIR="$PROJECT_ROOT/.opencode"
+exec opencode serve "${SERVE_ARGS[@]}" ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}
