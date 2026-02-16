@@ -5,7 +5,7 @@ import { ConfigService } from "../../services/config.service.js";
 import { AccessControlMiddleware } from "../../middleware/access-control.middleware.js";
 import { MessageUtils } from "../../utils/message.utils.js";
 import { ErrorUtils } from "../../utils/error.utils.js";
-import { formatAsHtml, escapeHtml } from "./event-handlers/utils.js";
+import { formatAsHtml, escapeHtml, startTypingIndicator, stopTypingIndicator } from "./event-handlers/utils.js";
 import { FileMentionService, FileMentionUI } from "../file-mentions/index.js";
 import { resetQuestionState, getQuestionCallback } from "./event-handlers/message-part-updated/tool-part.handler.js";
 import { getPermissionCallback } from "./event-handlers/permission.updated.handler.js";
@@ -341,8 +341,9 @@ export class OpenCodeBot {
 
     private async sendPromptToOpenCode(ctx: Context, userId: number, promptText: string, fileContext?: string): Promise<void> {
         try {
-            // Fire the prompt — response is delivered via SSE event stream,
-            // not from this call. sendPrompt is fire-and-forget.
+            if (ctx.chat?.id) {
+                startTypingIndicator(ctx.api, ctx.chat.id);
+            }
             await this.opencodeService.sendPrompt(userId, promptText, fileContext);
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("send prompt to OpenCode", error));
@@ -424,6 +425,7 @@ export class OpenCodeBot {
                 return;
             }
 
+            stopTypingIndicator();
             const success = await this.opencodeService.abortSession(userId);
 
             if (success) {

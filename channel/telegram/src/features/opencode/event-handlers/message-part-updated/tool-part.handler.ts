@@ -2,8 +2,7 @@ import type { Context } from "grammy";
 import type { UserSession } from "../../opencode.types.js";
 import { escapeHtml } from "../utils.js";
 
-let toolMessageId: number | null = null;
-let toolDeleteTimeout: NodeJS.Timeout | null = null;
+const toolCallMessages = new Map<string, number>();
 
 let activeQuestionMessageId: number | null = null;
 
@@ -23,7 +22,11 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
 
         const { verbosity, stream } = userSession;
 
-        if (verbosity < 1 && !stream) return;
+        if (verbosity < 1) return;
+        if (!stream) return;
+
+        const callID: string | undefined = part.callID || part.id;
+        if (!callID) return;
 
         let toolText = `[Tool] 🔧 ${part.tool}`;
 
@@ -37,38 +40,24 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
             if (outputSummary) toolText += `\n→ ${outputSummary}`;
         }
 
-        if (verbosity >= 2) {
-            // Each tool call gets its own persistent message
-            await ctx.reply(toolText);
+        const existingMsgId = toolCallMessages.get(callID);
+
+        if (existingMsgId) {
+            try {
+                await ctx.api.editMessageText(ctx.chat!.id, existingMsgId, toolText);
+            } catch {}
         } else {
-            // Low verbosity: reuse single message, auto-delete
-            if (toolDeleteTimeout) {
-                clearTimeout(toolDeleteTimeout);
-                toolDeleteTimeout = null;
-            }
-
-            if (!toolMessageId) {
-                const sentMessage = await ctx.reply(toolText);
-                toolMessageId = sentMessage.message_id;
-            } else {
-                try {
-                    await ctx.api.editMessageText(ctx.chat!.id, toolMessageId, toolText);
-                } catch {}
-            }
-
-            toolDeleteTimeout = setTimeout(async () => {
-                try {
-                    if (toolMessageId) {
-                        await ctx.api.deleteMessage(ctx.chat!.id, toolMessageId);
-                        toolMessageId = null;
-                    }
-                } catch {}
-            }, 2500);
+            const sentMessage = await ctx.reply(toolText);
+            toolCallMessages.set(callID, sentMessage.message_id);
         }
 
     } catch (error) {
         console.log("Error in tool part handler:", error);
     }
+}
+
+export function clearToolCallMessages(): void {
+    toolCallMessages.clear();
 }
 
 function summarizeArgs(input: any): string {
@@ -155,7 +144,8 @@ async function handleQuestionTool(ctx: Context, part: any): Promise<void> {
     }
 }
 
-// Reset active question state (called after answer is sent)
 export function resetQuestionState(): void {
     activeQuestionMessageId = null;
 }
+
+

@@ -29,6 +29,22 @@ export function formatAsHtml(text: string): string {
     // Keep newlines as-is - Telegram HTML supports them natively
 }
 
+let typingInterval: NodeJS.Timeout | null = null;
+
+export function startTypingIndicator(api: any, chatId: number): void {
+    stopTypingIndicator();
+    const send = () => { api.sendChatAction(chatId, "typing").catch(() => {}); };
+    send();
+    typingInterval = setInterval(send, 4000);
+}
+
+export function stopTypingIndicator(): void {
+    if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+    }
+}
+
 export async function sendAndAutoDelete(
     ctx: any,
     message: string,

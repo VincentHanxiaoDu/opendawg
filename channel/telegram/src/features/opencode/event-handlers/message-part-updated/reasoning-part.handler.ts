@@ -8,7 +8,8 @@ export async function handleReasoningPart(ctx: Context, userSession: UserSession
     try {
         const { verbosity, stream } = userSession;
 
-        if (verbosity < 1 && !stream) return;
+        if (verbosity < 1) return;
+        if (!stream) return;
 
         if (reasoningDeleteTimeout) {
             clearTimeout(reasoningDeleteTimeout);
@@ -20,19 +21,29 @@ export async function handleReasoningPart(ctx: Context, userSession: UserSession
             reasoningMessageId = sentMessage.message_id;
         }
 
-        const shouldAutoDelete = verbosity < 3;
-        if (shouldAutoDelete) {
-            reasoningDeleteTimeout = setTimeout(async () => {
-                try {
-                    if (reasoningMessageId) {
-                        await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
-                        reasoningMessageId = null;
-                    }
-                } catch {}
-            }, 2500);
-        }
+        reasoningDeleteTimeout = setTimeout(async () => {
+            try {
+                if (reasoningMessageId) {
+                    await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
+                    reasoningMessageId = null;
+                }
+            } catch {}
+        }, 2500);
 
     } catch (error) {
         console.log("Error in reasoning part handler:", error);
+    }
+}
+
+export async function cleanupReasoningMessages(ctx: Context): Promise<void> {
+    if (reasoningDeleteTimeout) {
+        clearTimeout(reasoningDeleteTimeout);
+        reasoningDeleteTimeout = null;
+    }
+    if (reasoningMessageId) {
+        try {
+            await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
+        } catch {}
+        reasoningMessageId = null;
     }
 }

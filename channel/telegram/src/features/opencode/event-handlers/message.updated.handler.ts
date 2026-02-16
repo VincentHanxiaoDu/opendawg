@@ -30,8 +30,7 @@ export default async function messageUpdatedHandler(
             
             console.log(`✓ Updated session title: "${title}"`);
             
-            // Send the new title to the user and auto-delete
-            await sendAndAutoDelete(ctx, `📝 New title: ${title}`, 2500);
+            await ctx.reply(`📝 New topic: ${title}`);
         }
     } catch (error) {
         console.log("Error in message.updated handler:", error);
