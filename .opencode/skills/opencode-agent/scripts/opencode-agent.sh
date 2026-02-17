@@ -1,249 +1,51 @@
 #!/usr/bin/env bash
-# Bootstrap and launch opencode with full environment and skills from a git repo.
-# Only consumes its own flags; everything else passes through to opencode.
+# Launch opencode. Lightweight — no setup, no updates, no network calls.
+# Run setup.sh first to prepare the environment.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SKILLS_ROOT="$(cd "$SKILL_DIR/.." && pwd)"
-
-# --- Defaults ---
-REPO_URL=""
-REPO_BRANCH="main"
-CONFIG_CLI_ENDPOINT=""
-CONFIG_CLI_TOKEN=""
-GRAPHITI_GROUP_ID="opendog"
-GRAPHITI_MODEL=""
 SESSION_ID=""
 LOG_LEVEL="DEBUG"
 USE_TUI=false
 CONTINUE_LAST=false
 OPENCODE_EXTRA_ARGS=()
 
-# --- Help ---
 show_help() {
-  cat <<'HELPEOF'
+  cat <<'EOF'
 Usage: opencode-agent.sh [options] [prompt...]
 
-Bootstrap and launch opencode with full environment and skills from a git repo.
-
-Mode:
-  By default, runs in CLI mode using `opencode run --format json` — non-interactive,
-  outputs JSON events to stdout. After completion, prints:
-    [opencode-agent] session=<session-id>
-  The caller captures this ID and passes -s <id> on the next run.
-
-  Use --tui to launch the interactive TUI instead.
-
-Session continuity:
-  1st run:  opencode-agent.sh "implement the login feature"
-            → outputs JSON + [opencode-agent] session=ses_abc123
-  2nd run:  opencode-agent.sh -s ses_abc123 "now add tests"
-            → continues the same session
-  Fresh:    opencode-agent.sh "unrelated task"
-            → new session, new ID
-
-Examples:
-  opencode-agent.sh --repo <url> "implement the login feature"
-  opencode-agent.sh -s ses_abc123 "now add tests for it"
-  opencode-agent.sh -c "continue whatever was last"
-  opencode-agent.sh --tui --repo <url>
+Launch opencode for a task. Run setup.sh first to prepare the environment.
 
 Options:
-  --repo <url>                  Git repo URL with .opencode/skills/ (required first run)
-  --repo-branch <branch>        Branch to use (default: main)
-  --config-cli-endpoint <url>   config-cli login endpoint URL
-  --config-cli-token <token>    config-cli token (alternative to endpoint)
-  --graphiti-group-id <id>      Override graphiti group ID (default: opendog)
-  --graphiti-model <model>      Override graphiti model
-  -s, --session <id>            Continue specific opencode session
-  -c, --continue                Continue the last session
-  --tui                         Launch interactive TUI instead of CLI mode
-  --log-level <level>           Log level for opencode (default: DEBUG)
-  -h, --help                    Show this help
+  -s, --session <id>   Continue specific session
+  -c, --continue       Continue the last session
+  --tui                Launch interactive TUI instead of CLI mode
+  --log-level <level>  Log level (default: DEBUG)
+  -h, --help           Show this help
 
 All other arguments are passed through to opencode.
 
-=== opencode help ===
-HELPEOF
-  opencode --help 2>/dev/null || echo "(opencode not yet installed)"
+Session workflow:
+  1st run:  opencode-agent.sh "/opendog build auth"
+            → [opencode-agent] session=ses_abc123
+  2nd run:  opencode-agent.sh -s ses_abc123 "/opendog add tests"
+EOF
 }
 
-# --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo)
-      REPO_URL="$2"; shift 2 ;;
-    --repo-branch)
-      REPO_BRANCH="$2"; shift 2 ;;
-    --config-cli-endpoint)
-      CONFIG_CLI_ENDPOINT="$2"; shift 2 ;;
-    --config-cli-token)
-      CONFIG_CLI_TOKEN="$2"; shift 2 ;;
-    --graphiti-group-id)
-      GRAPHITI_GROUP_ID="$2"; shift 2 ;;
-    --graphiti-model)
-      GRAPHITI_MODEL="$2"; shift 2 ;;
-    -s|--session)
-      SESSION_ID="$2"; shift 2 ;;
-    -c|--continue)
-      CONTINUE_LAST=true; shift ;;
-    --tui)
-      USE_TUI=true; shift ;;
-    --log-level)
-      LOG_LEVEL="$2"; shift 2 ;;
-    -h|--help)
-      show_help; exit 0 ;;
-    *)
-      OPENCODE_EXTRA_ARGS+=("$1"); shift ;;
+    -s|--session)  SESSION_ID="$2"; shift 2 ;;
+    -c|--continue) CONTINUE_LAST=true; shift ;;
+    --tui)         USE_TUI=true; shift ;;
+    --log-level)   LOG_LEVEL="$2"; shift 2 ;;
+    -h|--help)     show_help; exit 0 ;;
+    *)             OPENCODE_EXTRA_ARGS+=("$1"); shift ;;
   esac
 done
 
-# --- Step 2: Install skills from repo ---
-install_skills() {
-  local repo_url="$1"
-  local branch="${2:-main}"
-  local cache_dir="${TMPDIR:-/tmp}/opencode-agent-repo"
-
-  echo "[opencode-agent] Syncing skills from repo (branch: $branch)..."
-
-  # Clone or pull
-  if [[ -d "$cache_dir/.git" ]]; then
-    git -C "$cache_dir" fetch origin "$branch" --depth 1 2>/dev/null
-    git -C "$cache_dir" checkout "origin/$branch" -- .opencode/ 2>/dev/null || true
-  else
-    git clone --depth 1 --branch "$branch" "$repo_url" "$cache_dir"
-  fi
-
-  # Merge .opencode/ into $PWD/.opencode/
-  if [[ -d "$cache_dir/.opencode" ]]; then
-    mkdir -p "$PWD/.opencode"
-    # First pass: add new files without overwriting local-only content
-    rsync -a --ignore-existing "$cache_dir/.opencode/" "$PWD/.opencode/"
-    # Second pass: update skills to latest from repo
-    rsync -a "$cache_dir/.opencode/skills/" "$PWD/.opencode/skills/"
-    echo "[opencode-agent] Skills merged into $PWD/.opencode/"
-  else
-    echo "[opencode-agent] Warning: repo has no .opencode/ directory"
-  fi
-}
-
-if [[ -n "$REPO_URL" ]]; then
-  install_skills "$REPO_URL" "$REPO_BRANCH"
-fi
-
-# --- Step 3: Detect config-cli availability ---
-# If no config-cli flags were provided AND config-cli isn't installed AND vault dir
-# doesn't exist, skip config-cli and graphiti-memory entirely — don't bother the user.
-SKIP_CONFIG_CLI=false
-SKIP_GRAPHITI=false
-
-config_cli_requested() {
-  [[ -n "$CONFIG_CLI_ENDPOINT" ]] || [[ -n "$CONFIG_CLI_TOKEN" ]]
-}
-
-if ! config_cli_requested && ! command -v config-cli &>/dev/null; then
-  # No flags, no binary — check if the vault dir exists (previous install)
-  OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-  if [[ ! -d "${OPENDOG_ROOT}/.opendog/vault" ]]; then
-    echo "[opencode-agent] Skipping config-cli — not installed and no auth flags provided"
-    SKIP_CONFIG_CLI=true
-    SKIP_GRAPHITI=true
-  fi
-fi
-
-if [[ "$SKIP_CONFIG_CLI" = false ]]; then
-  # Ensure config-cli is installed
-  if ! command -v config-cli &>/dev/null; then
-    CONFIG_CLI_INSTALL="$SKILLS_ROOT/config-cli/scripts/install.sh"
-    if [[ -f "$CONFIG_CLI_INSTALL" ]]; then
-      echo "[opencode-agent] Installing config-cli..."
-      bash "$CONFIG_CLI_INSTALL"
-      OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-      export PATH="${OPENDOG_ROOT}/.opendog/bin:$PATH"
-    else
-      echo "[opencode-agent] Warning: config-cli not found and install script missing"
-      echo "  Expected: $CONFIG_CLI_INSTALL"
-      SKIP_CONFIG_CLI=true
-      SKIP_GRAPHITI=true
-    fi
-  fi
-fi
-
-# --- Step 4: Config-cli auth ---
-if [[ "$SKIP_CONFIG_CLI" = false ]]; then
-  if [[ -n "$CONFIG_CLI_ENDPOINT" ]]; then
-    echo "[opencode-agent] Authenticating with config-cli endpoint..."
-    config-cli login "$CONFIG_CLI_ENDPOINT"
-  elif [[ -n "$CONFIG_CLI_TOKEN" ]]; then
-    echo "[opencode-agent] Authenticating with config-cli token..."
-    config-cli login "https://auth?token=$CONFIG_CLI_TOKEN"
-  fi
-fi
-
-# --- Step 5: Setup environment from config-cli vault ---
-setup_env() {
-  if [[ "$SKIP_CONFIG_CLI" = true ]]; then
-    return
-  fi
-
-  if ! command -v config-cli &>/dev/null; then
-    echo "[opencode-agent] Skipping env setup — config-cli not available"
-    SKIP_GRAPHITI=true
-    return
-  fi
-
-  local vault_output
-  vault_output="$(config-cli get-all 2>/dev/null || echo "")"
-
-  if [[ -z "$vault_output" ]]; then
-    echo "[opencode-agent] Skipping env setup — config-cli vault is empty"
-    SKIP_GRAPHITI=true
-    return
-  fi
-
-  # Import all vault key-value pairs as environment variables
-  eval "$vault_output"
-  echo "[opencode-agent] Injected $(echo "$vault_output" | wc -l | tr -d ' ') keys from vault"
-
-  # Flag overrides
-  if [[ -n "$GRAPHITI_MODEL" ]]; then
-    export MODEL_NAME="$GRAPHITI_MODEL"
-  fi
-
-  export GRAPHITI_GROUP_ID="$GRAPHITI_GROUP_ID"
-}
-
-setup_env
-
-# --- Step 6: Check/install/update opencode ---
-CHECK_SCRIPT="$SCRIPT_DIR/check-opencode.sh"
-
 if ! command -v opencode &>/dev/null; then
-  echo "[opencode-agent] opencode not found — installing via Homebrew..."
-  if command -v brew &>/dev/null; then
-    brew install opencode
-  else
-    echo "[opencode-agent] ERROR: brew not found. Install opencode manually:"
-    echo "  https://opencode.ai/docs/install"
-    exit 1
-  fi
-elif [[ -f "$CHECK_SCRIPT" ]]; then
-  echo "[opencode-agent] Checking for opencode updates..."
-  CHECK_OUTPUT=$(bash "$CHECK_SCRIPT" 2>/dev/null) && UPDATE_AVAILABLE=true || UPDATE_AVAILABLE=false
-  echo "[opencode-agent] $CHECK_OUTPUT"
-
-  if [[ "$UPDATE_AVAILABLE" = true ]]; then
-    echo "[opencode-agent] Updating opencode..."
-    if command -v brew &>/dev/null; then
-      brew upgrade opencode 2>/dev/null || opencode upgrade 2>/dev/null || true
-    else
-      opencode upgrade 2>/dev/null || true
-    fi
-  fi
+  echo "[opencode-agent] ERROR: opencode not found. Run setup.sh first."
+  exit 1
 fi
-
-# --- Step 7: Launch opencode ---
 
 SESSION_ARGS=()
 if [[ -n "$SESSION_ID" ]]; then
@@ -253,18 +55,18 @@ elif [[ "$CONTINUE_LAST" = true ]]; then
 fi
 
 if [[ "$USE_TUI" = true ]]; then
-  echo "[opencode-agent] Launching opencode TUI..."
   exec opencode --log-level "$LOG_LEVEL" \
     ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
     ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}
+elif [[ -n "$SESSION_ID" ]] || [[ "$CONTINUE_LAST" = true ]]; then
+  exec opencode run --log-level "$LOG_LEVEL" \
+    ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
+    ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}
 else
-  echo "[opencode-agent] Running opencode CLI (session: ${SESSION_ARGS[*]:-new})..."
-
   OUTPUT_FILE="${TMPDIR:-/tmp}/opencode-agent-output.$$"
   trap 'rm -f "$OUTPUT_FILE"' EXIT
 
   opencode run --format json --log-level "$LOG_LEVEL" \
-    ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
     ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"} \
     | tee "$OUTPUT_FILE"
   OC_EXIT=${PIPESTATUS[0]}

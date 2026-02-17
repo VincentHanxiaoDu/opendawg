@@ -241,9 +241,7 @@ if [[ "$SKIP_GRAPHITI" = true ]]; then
   echo "[opencode-server] Skipping graphiti-memory — config-cli not available"
 fi
 
-# --- Step 6: Check/install/update opencode ---
-CHECK_SCRIPT="$SCRIPT_DIR/check-opencode.sh"
-
+# --- Step 6: Install opencode if missing, then auto-update ---
 if ! command -v opencode &>/dev/null; then
   echo "[opencode-server] opencode not found — installing via Homebrew..."
   if command -v brew &>/dev/null; then
@@ -253,19 +251,12 @@ if ! command -v opencode &>/dev/null; then
     echo "  https://opencode.ai/docs/install"
     exit 1
   fi
-elif [[ -f "$CHECK_SCRIPT" ]]; then
-  echo "[opencode-server] Checking for opencode updates..."
-  CHECK_OUTPUT=$(bash "$CHECK_SCRIPT" 2>/dev/null) && UPDATE_AVAILABLE=true || UPDATE_AVAILABLE=false
-  echo "[opencode-server] $CHECK_OUTPUT"
-
-  if [[ "$UPDATE_AVAILABLE" = true ]]; then
-    echo "[opencode-server] Updating opencode..."
-    if command -v brew &>/dev/null; then
-      brew upgrade opencode 2>/dev/null || opencode upgrade 2>/dev/null || true
-    else
-      opencode upgrade 2>/dev/null || true
-    fi
-  fi
+else
+  echo "[opencode-server] opencode $(opencode --version 2>/dev/null || echo '?') — checking for updates..."
+  opencode upgrade 2>/dev/null \
+    || HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade opencode 2>/dev/null \
+    || true
+  echo "[opencode-server] opencode $(opencode --version 2>/dev/null || echo '?') — ready"
 fi
 
 # --- Step 7: Launch opencode serve ---

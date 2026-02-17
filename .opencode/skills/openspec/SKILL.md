@@ -1,6 +1,6 @@
 ---
 name: openspec
-description: Spec-driven development framework for complex coding tasks. Use OpenSpec when the task involves multi-component features, architectural changes, large refactors (10+ files), new subsystems, or any significant coding work that benefits from structured planning before implementation. Triggers on mentions of openspec, opsx, spec-driven development, delta specs, change artifacts, proposals, or structured coding workflows. Also use when the agent-entry-point triages a task as Tier 3 (complex).
+description: Spec-driven development framework for complex coding tasks. Use OpenSpec when the task involves multi-component features, architectural changes, large refactors (10+ files), new subsystems, or any significant coding work that benefits from structured planning before implementation. Triggers on mentions of openspec, opsx, spec-driven development, delta specs, change artifacts, proposals, or structured coding workflows. Also use when the /opendog command triages a task as Tier 3 (complex).
 ---
 
 # OpenSpec — Spec-Driven Development
