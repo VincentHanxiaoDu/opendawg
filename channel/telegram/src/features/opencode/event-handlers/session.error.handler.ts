@@ -2,8 +2,6 @@ import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
 import { escapeHtml } from "./utils.js";
-import * as fs from 'fs';
-import * as path from 'path';
 
 type SessionErrorEvent = Extract<Event, { type: "session.error" }>;
 
@@ -12,16 +10,20 @@ export default async function sessionErrorHandler(
     ctx: Context,
     userSession: UserSession
 ): Promise<string | null> {
-    console.log(event.type);
-    
-    const eventsDir = path.join(process.cwd(), 'events');
-    if (!fs.existsSync(eventsDir)) {
-        fs.mkdirSync(eventsDir, { recursive: true });
+    console.error("session.error:", JSON.stringify(event.properties));
+
+    try {
+        const props = event.properties as any;
+        const errorMsg = props?.error || props?.message || JSON.stringify(props);
+        const truncated = String(errorMsg).slice(0, 500);
+        await ctx.api.sendMessage(
+            userSession.chatId!,
+            `⚠️ <b>Session Error</b>\n<pre>${escapeHtml(truncated)}</pre>`,
+            { parse_mode: "HTML" }
+        );
+    } catch (sendErr) {
+        console.error("Failed to send error to user:", sendErr);
     }
 
-    const eventType = event.type.replace(/\./g, '-');
-    const filePath = path.join(eventsDir, `${eventType}.last.json`);
-    fs.writeFileSync(filePath, JSON.stringify(event, null, 2), 'utf8');
-    
     return null;
 }

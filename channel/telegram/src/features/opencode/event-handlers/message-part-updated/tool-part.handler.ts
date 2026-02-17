@@ -1,7 +1,5 @@
 import type { Context } from "grammy";
 import type { UserSession } from "../../opencode.types.js";
-import { escapeHtml } from "../utils.js";
-
 const toolCallMessages = new Map<string, number>();
 
 export let activeQuestionMessageId: number | null = null;
@@ -88,65 +86,6 @@ export function makeQCallback(sessionID: string, callID: string, qIdx: number, a
     return id;
 }
 
-async function handleQuestionTool(ctx: Context, part: any): Promise<void> {
-    try {
-        const input = part.state.input;
-
-        // input may have "questions" array (AskUserQuestion format)
-        const questions: any[] = input.questions || [];
-        if (questions.length === 0) return;
-
-        // If we already sent a question message for this tool call, skip
-        if (activeQuestionMessageId) return;
-
-        for (let qIdx = 0; qIdx < questions.length; qIdx++) {
-            const q = questions[qIdx];
-            const questionText = q.question || "Question";
-            const header = q.header || "";
-            const options: any[] = q.options || [];
-
-            // Build message
-            let msg = `❓ <b>${escapeHtml(header)}</b>\n\n${escapeHtml(questionText)}`;
-
-            // Build option descriptions
-            for (let i = 0; i < options.length; i++) {
-                const opt = options[i];
-                msg += `\n\n<b>${i + 1}. ${escapeHtml(opt.label)}</b>`;
-                if (opt.description) {
-                    msg += `\n${escapeHtml(opt.description)}`;
-                }
-            }
-
-            // Build inline keyboard with short callback IDs
-            const buttons = options.map((opt: any, i: number) => ({
-                text: opt.label,
-                callback_data: makeQCallback(part.sessionID, part.callID, qIdx, String(i), opt.label),
-            }));
-
-            // Put max 2 per row
-            const rows: any[][] = [];
-            for (let i = 0; i < buttons.length; i += 2) {
-                rows.push(buttons.slice(i, i + 2));
-            }
-            // Add skip/custom row
-            rows.push([
-                { text: "✍️ Custom", callback_data: makeQCallback(part.sessionID, part.callID, qIdx, "custom", "") },
-                { text: "⏭ Skip", callback_data: makeQCallback(part.sessionID, part.callID, qIdx, "skip", "") },
-            ]);
-
-            const sentMessage = await ctx.reply(msg, {
-                parse_mode: "HTML",
-                reply_markup: { inline_keyboard: rows },
-            });
-            activeQuestionMessageId = sentMessage.message_id;
-        }
-    } catch (error) {
-        console.log("Error handling question tool:", error);
-    }
-}
-
 export function resetQuestionState(): void {
     activeQuestionMessageId = null;
 }
-
-

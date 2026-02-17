@@ -131,29 +131,18 @@ export async function processEvent(
     event: Event,
     ctx: Context,
     userSession: UserSession
-): Promise<string | null> {
+): Promise<void> {
     try {
         const eventSessionID = extractSessionID(event);
         if (eventSessionID && eventSessionID !== userSession.sessionId) {
-            return null;
+            return;
         }
 
         const handler = eventHandlers[event.type];
-
         if (handler) {
-            // TypeScript knows the event type is correct here
-            const result = await handler(event as any, ctx, userSession);
-            if (result) {
-                // console.log(`[EventHandler] Handled event: ${event.type}`);
-                return result;
-            }
-        }
-
-        if (!handler) {
-            return null
+            await handler(event as any, ctx, userSession);
         }
     } catch (error) {
         console.error(`Error handling event ${event.type}:`, error);
-        return null;
     }
 }
