@@ -268,10 +268,7 @@ elif [[ -f "$CHECK_SCRIPT" ]]; then
   fi
 fi
 
-# --- Step 7: Skip oh-my-opencode (TUI plugin, not needed for server) ---
-echo "[opencode-server] Skipping oh-my-opencode — not applicable in server mode"
-
-# --- Step 8: Launch opencode serve ---
+# --- Step 7: Launch opencode serve ---
 # Use a dedicated working directory so opencode's file operations are isolated
 SERVE_DIR="${PROJECT_ROOT}"
 mkdir -p "$SERVE_DIR"

@@ -18,7 +18,7 @@ You have access to these skills — use them when relevant:
 | Skill | Purpose |
 |-------|---------|
 | **tmux-tty** | Run anything that needs a TTY (REPLs, interactive CLIs, editors) via isolated tmux sessions |
-| **opencode-agent** | Spawn fully-configured opencode instances (local or remote) via tmux-tty. Includes oh-my-opencode setup (multi-agent orchestration with Sisyphus, Oracle, Librarian, etc.) |
+| **opencode-agent** | Spawn fully-configured opencode instances (local or remote) via tmux-tty |
 | **mcp-cli** | Use MCP servers on-demand without polluting context |
 | **config-cli** | Secure vault for API keys, passwords, tokens (AES-256-CBC encrypted) — *only if configured* |
 | **graphiti-memory** | Long-term memory via Graphiti knowledge graph — *only if config-cli vault has AZURE_OPENAI_API_KEY and Neo4j is running* |

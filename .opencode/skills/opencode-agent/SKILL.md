@@ -5,7 +5,7 @@ description: Spawn and manage fully-configured opencode CLI sessions via tmux-tt
 
 # opencode-agent
 
-Bootstrap and launch opencode with full environment setup — skills from a git repo, config-cli auth, vault secrets, and opencode/oh-my-opencode installation — then control it through tmux-tty.
+Bootstrap and launch opencode with full environment setup — skills from a git repo, config-cli auth, vault secrets, and opencode installation — then control it through tmux-tty.
 
 ## CLI vs TUI Mode
 
@@ -62,7 +62,7 @@ grep -o 'session=ses_[^ ]*' <<< "$CAPTURED_OUTPUT" | tail -1 | cut -d= -f2
 The script will:
 1. Clone/pull the repo and merge `.opencode/skills/` into the project
 2. Install and authenticate config-cli, inject env vars from vault
-3. Install or update opencode and oh-my-opencode
+3. Install or update opencode
 4. Run `opencode run --format json "implement the login feature"`
 5. After completion, print `[opencode-agent] session=ses_xxx` and return to shell
 
@@ -184,20 +184,6 @@ bash <skill-path>/scripts/opencode-agent.sh [options] [prompt...]
 
 All unrecognized flags pass through to opencode.
 
-## oh-my-opencode Management
-
-The bootstrap script automatically handles oh-my-opencode installation and updates via `scripts/setup-oh-my-opencode.sh`. This consolidated script:
-
-- Detects bun or npm as the package runner
-- Checks if oh-my-opencode is installed and what version
-- Installs if missing, updates if outdated
-- Runs post-install/update diagnostics
-
-Manual run:
-```bash
-bash <skill-path>/scripts/setup-oh-my-opencode.sh
-```
-
 ## Version Check
 
 Check if opencode has an update available:
@@ -226,7 +212,6 @@ The bootstrap injects these from config-cli vault:
 - **git** — for cloning the skills repo
 - **tmux** — for TTY session management (via tmux-tty skill)
 - **brew** — for installing/updating opencode (macOS)
-- **bun or npm** — for oh-my-opencode
 - **rsync** — for incremental skills merge
 
 ## Pitfalls

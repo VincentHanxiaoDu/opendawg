@@ -243,15 +243,7 @@ elif [[ -f "$CHECK_SCRIPT" ]]; then
   fi
 fi
 
-# --- Step 7: Check/install/update oh-my-opencode ---
-OMO_SETUP="$SCRIPT_DIR/setup-oh-my-opencode.sh"
-
-if [[ -f "$OMO_SETUP" ]]; then
-  echo "[opencode-agent] Setting up oh-my-opencode..."
-  bash "$OMO_SETUP" || echo "[opencode-agent] Warning: oh-my-opencode setup had issues"
-fi
-
-# --- Step 8: Launch opencode ---
+# --- Step 7: Launch opencode ---
 
 SESSION_ARGS=()
 if [[ -n "$SESSION_ID" ]]; then
