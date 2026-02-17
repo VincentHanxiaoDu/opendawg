@@ -79,17 +79,10 @@ export class OpenCodeBot {
         bot.on("message:voice", AccessControlMiddleware.requireAccess, this.handleFileUpload.bind(this));
         bot.on("message:video_note", AccessControlMiddleware.requireAccess, this.handleFileUpload.bind(this));
         
-        // Handle regular messages (non-commands) as prompts
         bot.on("message:text", AccessControlMiddleware.requireAccess, async (ctx, next) => {
-            // Skip if it's a command
-            if (ctx.message?.text?.startsWith("/")) {
-                return next();
-            }
-            // Skip if it's a keyboard button
             if (ctx.message?.text === "⏹️ ESC" || ctx.message?.text === "⇥ TAB") {
                 return next();
             }
-            // Treat as prompt
             await this.handleMessageAsPrompt(ctx);
         });
     }
@@ -256,10 +249,14 @@ export class OpenCodeBot {
                 return;
             }
 
-            const promptText = ctx.message?.text?.trim() || "";
+            let promptText = ctx.message?.text?.trim() || "";
 
             if (!promptText) {
                 return;
+            }
+
+            if (promptText.startsWith("//")) {
+                promptText = promptText.substring(1);
             }
 
             // Check if this is a custom answer to a pending question
@@ -284,13 +281,20 @@ export class OpenCodeBot {
                 return;
             }
 
-            // Check for file mentions
-            const mentions = this.fileMentionService.parseMentions(promptText);
-            
-            if (mentions.length > 0 && this.fileMentionService.isEnabled()) {
-                await this.handlePromptWithMentions(ctx, userId, promptText, mentions);
+            if (promptText.startsWith("/")) {
+                const spaceIndex = promptText.indexOf(" ");
+                const commandName = spaceIndex > 0 ? promptText.substring(1, spaceIndex) : promptText.substring(1);
+                const commandArgs = spaceIndex > 0 ? promptText.substring(spaceIndex + 1).trim() : "";
+                if (commandName) {
+                    await this.sendCommandToOpenCode(ctx, userId, commandName, commandArgs, promptText);
+                }
             } else {
-                await this.sendPromptToOpenCode(ctx, userId, promptText);
+                const mentions = this.fileMentionService.parseMentions(promptText);
+                if (mentions.length > 0 && this.fileMentionService.isEnabled()) {
+                    await this.handlePromptWithMentions(ctx, userId, promptText, mentions);
+                } else {
+                    await this.sendPromptToOpenCode(ctx, userId, promptText);
+                }
             }
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("send prompt to OpenCode", error));
@@ -336,6 +340,20 @@ export class OpenCodeBot {
             
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("process file mentions", error));
+        }
+    }
+
+    private async sendCommandToOpenCode(ctx: Context, userId: number, command: string, args: string, fullText: string): Promise<void> {
+        try {
+            if (ctx.chat?.id) {
+                startTypingIndicator(ctx.api, ctx.chat.id);
+            }
+            const resolved = await this.opencodeService.sendCommand(userId, command, args);
+            if (!resolved) {
+                await this.sendPromptToOpenCode(ctx, userId, fullText);
+            }
+        } catch (error) {
+            await ctx.reply(ErrorUtils.createErrorMessage("execute command", error));
         }
     }
 

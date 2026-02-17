@@ -13,4 +13,5 @@ export interface UserSession {
     currentAgent?: string;
     verbosity: VerbosityLevel;
     stream: boolean;
+    lastTitle?: string;
 }

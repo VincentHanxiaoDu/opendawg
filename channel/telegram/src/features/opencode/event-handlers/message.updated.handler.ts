@@ -18,7 +18,9 @@ export default async function messageUpdatedHandler(
         if (info?.summary?.title) {
             const title = info.summary.title;
             
-            // Update the session title using OpenCode SDK
+            if (title === userSession.lastTitle) return null;
+            userSession.lastTitle = title;
+            
             const client = createOpencodeClient({
                 baseUrl: process.env.OPENCODE_SERVER_URL || "http://localhost:4096"
             });

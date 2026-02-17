@@ -98,6 +98,54 @@ export class OpenCodeService {
         }
     }
 
+    async resolveCommandName(input: string): Promise<string | null> {
+        const client = createOpencodeClient({ baseUrl: this.baseUrl });
+        try {
+            const result = await client.command.list();
+            if (!result.data) return null;
+
+            const commands = result.data as Array<{ name: string }>;
+            const exact = commands.find(c => c.name === input);
+            if (exact) return exact.name;
+
+            const normalize = (s: string) => s.toLowerCase().replace(/[-\s]+/g, " ").trim();
+            const normalized = normalize(input);
+            const match = commands.find(c => normalize(c.name) === normalized);
+            return match ? match.name : null;
+        } catch (error) {
+            console.error("Failed to resolve command name:", error);
+            return null;
+        }
+    }
+
+    async sendCommand(userId: number, command: string, args: string): Promise<boolean> {
+        const userSession = this.getUserSession(userId);
+
+        if (!userSession) {
+            throw new Error("No active session. Please use /opencode to start a session first.");
+        }
+
+        const resolvedName = await this.resolveCommandName(command);
+        if (!resolvedName) return false;
+
+        const client = createOpencodeClient({ baseUrl: this.baseUrl });
+
+        client.session.command({
+            sessionID: userSession.sessionId,
+            command: resolvedName,
+            arguments: args,
+            agent: userSession.currentAgent,
+        }).catch((error) => {
+            if (error instanceof Error && (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED'))) {
+                console.error(`Cannot connect to OpenCode server at ${this.baseUrl}`);
+            } else {
+                console.error("Command error:", error);
+            }
+        });
+
+        return true;
+    }
+
     async sendPrompt(userId: number, text: string, fileContext?: string): Promise<void> {
         const userSession = this.getUserSession(userId);
 

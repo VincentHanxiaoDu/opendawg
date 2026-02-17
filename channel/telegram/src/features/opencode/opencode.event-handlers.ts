@@ -34,6 +34,7 @@ import tuiToastShow from "./event-handlers/tui.toast.show.handler.js";
 import ptyUpdated from "./event-handlers/pty.updated.handler.js";
 import ptyDeleted from "./event-handlers/pty.deleted.handler.js";
 import serverConnected from "./event-handlers/server.connected.handler.js";
+import questionAsked from "./event-handlers/question.asked.handler.js";
 import { escapeHtml } from "./event-handlers/utils.js";
 
 /**
@@ -67,6 +68,7 @@ export const eventHandlers: EventHandlerMap = {
     "permission.updated": permissionUpdated,
     "permission.asked": permissionUpdated as any,  // v2 event name
     "permission.replied": permissionReplied,
+    "question.asked": questionAsked as any,
     "session.status": sessionStatus,
     "session.idle": sessionIdle,
     "session.compacted": sessionCompacted,

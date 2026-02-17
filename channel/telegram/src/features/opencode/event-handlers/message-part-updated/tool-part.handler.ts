@@ -4,7 +4,11 @@ import { escapeHtml } from "../utils.js";
 
 const toolCallMessages = new Map<string, number>();
 
-let activeQuestionMessageId: number | null = null;
+export let activeQuestionMessageId: number | null = null;
+
+export function setActiveQuestionMessageId(id: number | null): void {
+    activeQuestionMessageId = id;
+}
 
 let nextQId = 0;
 const questionCallbackMap = new Map<string, { sessionID: string; callID: string; qIdx: number; action: string; label: string }>();
@@ -15,10 +19,7 @@ export function getQuestionCallback(shortId: string) {
 
 export async function handleToolPart(ctx: Context, part: any, userSession: UserSession): Promise<void> {
     try {
-        if (part.tool === "question" && part.state?.input) {
-            await handleQuestionTool(ctx, part);
-            return;
-        }
+        if (part.tool === "question") return;
 
         const { verbosity, stream } = userSession;
 
@@ -81,7 +82,7 @@ function summarizeOutput(output: any): string {
     return str;
 }
 
-function makeQCallback(sessionID: string, callID: string, qIdx: number, action: string, label: string): string {
+export function makeQCallback(sessionID: string, callID: string, qIdx: number, action: string, label: string): string {
     const id = `q${nextQId++}`;
     questionCallbackMap.set(id, { sessionID, callID, qIdx, action, label });
     return id;
