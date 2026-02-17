@@ -117,13 +117,27 @@ async function defaultHandler(event: Event, ctx: Context, userSession: UserSessi
  * Process an event through the appropriate handler
  * Returns a message to send to the user, or null to ignore the event
  */
+function extractSessionID(event: Event): string | undefined {
+    const props = (event as any).properties;
+    if (!props) return undefined;
+    if (props.sessionID) return props.sessionID;
+    if (props.info?.sessionID) return props.info.sessionID;
+    if (props.info?.id && event.type.startsWith("session.")) return props.info.id;
+    if (props.part?.sessionID) return props.part.sessionID;
+    return undefined;
+}
+
 export async function processEvent(
     event: Event,
     ctx: Context,
     userSession: UserSession
 ): Promise<string | null> {
     try {
-        // Check if we have a specific handler for this event type
+        const eventSessionID = extractSessionID(event);
+        if (eventSessionID && eventSessionID !== userSession.sessionId) {
+            return null;
+        }
+
         const handler = eventHandlers[event.type];
 
         if (handler) {
