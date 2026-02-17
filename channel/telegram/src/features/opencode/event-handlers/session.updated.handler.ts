@@ -1,7 +1,6 @@
 import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
-import { escapeHtml } from "./utils.js";
 
 type SessionUpdatedEvent = Extract<Event, { type: "session.updated" }>;
 

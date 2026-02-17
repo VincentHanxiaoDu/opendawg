@@ -2,7 +2,7 @@ import type { Event } from "@opencode-ai/sdk/v2";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
-import { sendAndAutoDelete } from "./utils.js";
+import { escapeHtml } from "./utils.js";
 
 type MessageUpdatedEvent = Extract<Event, { type: "message.updated" }>;
 
@@ -13,10 +13,10 @@ export default async function messageUpdatedHandler(
 ): Promise<string | null> {
     try {
         const { info } = event.properties;
+        const summary = info?.summary as Record<string, unknown> | undefined;
         
-        // Check if title exists in info.summary
-        if (info?.summary?.title) {
-            const title = info.summary.title;
+        if (summary?.title && typeof summary.title === "string") {
+            const title = summary.title;
             
             if (title === userSession.lastTitle) return null;
             userSession.lastTitle = title;
@@ -32,7 +32,7 @@ export default async function messageUpdatedHandler(
             
             console.log(`✓ Updated session title: "${title}"`);
             
-            await ctx.reply(`📝 New topic: ${title}`);
+            await ctx.reply(`📝 New topic: ${escapeHtml(title)}`, { parse_mode: "HTML" });
         }
     } catch (error) {
         console.log("Error in message.updated handler:", error);

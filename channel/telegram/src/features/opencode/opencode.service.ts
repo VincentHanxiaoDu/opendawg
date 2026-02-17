@@ -3,6 +3,11 @@ import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "./opencode.types.js";
 import { processEvent } from "./opencode.event-handlers.js";
+import { cleanupTextState } from "./event-handlers/message-part-updated/text-part.handler.js";
+import { cleanupReasoningState } from "./event-handlers/message-part-updated/reasoning-part.handler.js";
+import { cleanupToolState, cleanupCallbackMaps } from "./event-handlers/message-part-updated/tool-part.handler.js";
+import { cleanupPermissionCallbacks } from "./event-handlers/permission.updated.handler.js";
+import { stopTypingIndicator } from "./event-handlers/utils.js";
 
 export class OpenCodeService {
     private userSessions: Map<number, UserSession> = new Map();
@@ -64,30 +69,48 @@ export class OpenCodeService {
             return;
         }
 
-        // Stop any existing event stream for this user
         this.stopEventStream(userId);
 
         const abortController = new AbortController();
         this.eventAbortControllers.set(userId, abortController);
 
-        const client = createOpencodeClient({ baseUrl: this.baseUrl });
+        const MAX_RETRIES = 10;
+        const BASE_DELAY_MS = 1000;
+        let retries = 0;
 
-        try {
-            const events = await client.event.subscribe();
+        while (!abortController.signal.aborted) {
+            try {
+                const client = createOpencodeClient({ baseUrl: this.baseUrl });
+                const events = await client.event.subscribe();
 
-            for await (const event of events.stream) {
-                if (abortController.signal.aborted) {
-                    break;
+                retries = 0;
+
+                for await (const event of events.stream) {
+                    if (abortController.signal.aborted) break;
+                    await processEvent(event, ctx, userSession);
                 }
 
-                // Process event through handler
-                await processEvent(event, ctx, userSession);
+                if (abortController.signal.aborted) break;
+            } catch (error) {
+                if (abortController.signal.aborted) break;
+                console.error(`Event stream error (retry ${retries + 1}/${MAX_RETRIES}):`, error);
             }
-        } catch (error) {
-            console.error("Event stream error:", error);
-        } finally {
-            this.eventAbortControllers.delete(userId);
+
+            retries++;
+            if (retries > MAX_RETRIES) {
+                console.error(`Event stream: giving up after ${MAX_RETRIES} retries for user ${userId}`);
+                break;
+            }
+
+            const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retries - 1), 30000);
+            await new Promise<void>(resolve => {
+                const timer = setTimeout(resolve, delay);
+                const onAbort = () => { clearTimeout(timer); resolve(); };
+                abortController.signal.addEventListener("abort", onAbort, { once: true });
+            });
         }
+
+        this.eventAbortControllers.delete(userId);
     }
 
     stopEventStream(userId: number): void {
@@ -183,19 +206,28 @@ export class OpenCodeService {
             return false;
         }
 
-        // Stop event stream first
+        const { sessionId } = userSession;
+
         this.stopEventStream(userId);
+
+        stopTypingIndicator(sessionId);
+        cleanupTextState(sessionId);
+        cleanupReasoningState(sessionId);
+        cleanupToolState(sessionId);
+        cleanupCallbackMaps(sessionId);
+        cleanupPermissionCallbacks(sessionId);
 
         const client = createOpencodeClient({ baseUrl: this.baseUrl });
 
         try {
             await client.session.delete({
-                sessionID: userSession.sessionId,
+                sessionID: sessionId,
             });
             this.userSessions.delete(userId);
             return true;
         } catch (error) {
             console.error(`Failed to delete session for user ${userId}:`, error);
+            this.userSessions.delete(userId);
             return false;
         }
     }
@@ -385,6 +417,24 @@ export class OpenCodeService {
             console.error("Failed to get sessions:", error);
             return [];
         }
+    }
+
+    stopAllEventStreams(): void {
+        for (const [userId, controller] of this.eventAbortControllers.entries()) {
+            controller.abort();
+        }
+        this.eventAbortControllers.clear();
+
+        for (const [userId, session] of this.userSessions.entries()) {
+            const sid = session.sessionId;
+            stopTypingIndicator(sid);
+            cleanupTextState(sid);
+            cleanupReasoningState(sid);
+            cleanupToolState(sid);
+            cleanupCallbackMaps(sid);
+            cleanupPermissionCallbacks(sid);
+        }
+        this.userSessions.clear();
     }
 
     async undoLastMessage(userId: number): Promise<{ success: boolean; message?: string }> {

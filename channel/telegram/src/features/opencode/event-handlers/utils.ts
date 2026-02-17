@@ -29,20 +29,28 @@ export function formatAsHtml(text: string): string {
     // Keep newlines as-is - Telegram HTML supports them natively
 }
 
-let typingInterval: NodeJS.Timeout | null = null;
+const typingIntervals = new Map<string, NodeJS.Timeout>();
 
-export function startTypingIndicator(api: any, chatId: number): void {
-    stopTypingIndicator();
+export function startTypingIndicator(sessionId: string, api: any, chatId: number): void {
+    stopTypingIndicator(sessionId);
     const send = () => { api.sendChatAction(chatId, "typing").catch(() => {}); };
     send();
-    typingInterval = setInterval(send, 4000);
+    typingIntervals.set(sessionId, setInterval(send, 4000));
 }
 
-export function stopTypingIndicator(): void {
-    if (typingInterval) {
-        clearInterval(typingInterval);
-        typingInterval = null;
+export function stopTypingIndicator(sessionId: string): void {
+    const interval = typingIntervals.get(sessionId);
+    if (interval) {
+        clearInterval(interval);
+        typingIntervals.delete(sessionId);
     }
+}
+
+export function stopAllTypingIndicators(): void {
+    for (const interval of typingIntervals.values()) {
+        clearInterval(interval);
+    }
+    typingIntervals.clear();
 }
 
 export async function sendAndAutoDelete(
@@ -51,10 +59,12 @@ export async function sendAndAutoDelete(
     deleteAfterMs: number = 2500
 ): Promise<void> {
     try {
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
         const sentMessage = await ctx.reply(message);
         setTimeout(async () => {
             try {
-                await ctx.api.deleteMessage(ctx.chat!.id, sentMessage.message_id);
+                await ctx.api.deleteMessage(chatId, sentMessage.message_id);
             } catch (error) {
                 console.log("Error deleting auto-delete message:", error);
             }

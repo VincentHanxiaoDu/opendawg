@@ -12,8 +12,23 @@ import { getPermissionCallback } from "./event-handlers/permission.updated.handl
 import * as fs from "fs";
 import * as path from "path";
 
-// Track pending custom question answers: userId -> { callId, qIdx }
-const pendingQuestionAnswers = new Map<number, { callId: string; qIdx: number }>();
+const pendingQuestionAnswers = new Map<number, { callId: string; qIdx: number; expiresAt: number }>();
+
+const QUESTION_ANSWER_TTL_MS = 5 * 60 * 1000;
+
+function setPendingQuestion(userId: number, callId: string, qIdx: number): void {
+    pendingQuestionAnswers.set(userId, { callId, qIdx, expiresAt: Date.now() + QUESTION_ANSWER_TTL_MS });
+}
+
+function getPendingQuestion(userId: number): { callId: string; qIdx: number } | undefined {
+    const entry = pendingQuestionAnswers.get(userId);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+        pendingQuestionAnswers.delete(userId);
+        return undefined;
+    }
+    return entry;
+}
 
 export class OpenCodeBot {
     private opencodeService: OpenCodeService;
@@ -179,13 +194,13 @@ export class OpenCodeBot {
 
             // Create a new session
             const statusMessage = await ctx.reply("🔄 Starting OpenCode session...");
+            const chatId = statusMessage.chat.id;
 
             try {
-                // Try to create session with optional title
                 const userSession = await this.opencodeService.createSession(userId, title);
 
                 const successMessage = await ctx.api.editMessageText(
-                    ctx.chat!.id,
+                    chatId,
                     statusMessage.message_id,
                     "✅ Session started",
                     {
@@ -200,7 +215,6 @@ export class OpenCodeBot {
                     }
                 );
 
-                // Schedule auto-deletion of the session started message
                 const messageId = (typeof successMessage === "object" && successMessage && "message_id" in successMessage) ? (successMessage as any).message_id : statusMessage.message_id;
                 await MessageUtils.scheduleMessageDeletion(
                     ctx,
@@ -208,16 +222,14 @@ export class OpenCodeBot {
                     this.configService.getMessageDeleteTimeout()
                 );
 
-                // Store chat context and start event streaming
-                this.opencodeService.updateSessionContext(userId, ctx.chat!.id, messageId);
+                this.opencodeService.updateSessionContext(userId, chatId, messageId);
 
-                // Start event streaming in background
                 this.opencodeService.startEventStream(userId, ctx).catch(error => {
                     console.error("Event stream error:", error);
                 });
             } catch (error) {
                 await ctx.api.editMessageText(
-                    ctx.chat!.id,
+                    chatId,
                     statusMessage.message_id,
                     ErrorUtils.createErrorMessage("start OpenCode session", error)
                 );
@@ -251,8 +263,7 @@ export class OpenCodeBot {
                 promptText = promptText.substring(1);
             }
 
-            // Check if this is a custom answer to a pending question
-            const pendingQuestion = pendingQuestionAnswers.get(userId);
+            const pendingQuestion = getPendingQuestion(userId);
             if (pendingQuestion) {
                 pendingQuestionAnswers.delete(userId);
                 try {
@@ -337,8 +348,9 @@ export class OpenCodeBot {
 
     private async sendCommandToOpenCode(ctx: Context, userId: number, command: string, args: string, fullText: string): Promise<void> {
         try {
-            if (ctx.chat?.id) {
-                startTypingIndicator(ctx.api, ctx.chat.id);
+            const session = this.opencodeService.getUserSession(userId);
+            if (ctx.chat?.id && session) {
+                startTypingIndicator(session.sessionId, ctx.api, ctx.chat.id);
             }
             const resolved = await this.opencodeService.sendCommand(userId, command, args);
             if (!resolved) {
@@ -351,8 +363,9 @@ export class OpenCodeBot {
 
     private async sendPromptToOpenCode(ctx: Context, userId: number, promptText: string, fileContext?: string): Promise<void> {
         try {
-            if (ctx.chat?.id) {
-                startTypingIndicator(ctx.api, ctx.chat.id);
+            const session = this.opencodeService.getUserSession(userId);
+            if (ctx.chat?.id && session) {
+                startTypingIndicator(session.sessionId, ctx.api, ctx.chat.id);
             }
             await this.opencodeService.sendPrompt(userId, promptText, fileContext);
         } catch (error) {
@@ -360,34 +373,6 @@ export class OpenCodeBot {
         }
     }
 
-
-
-    private splitIntoChunks(text: string, maxLength: number): string[] {
-        const chunks: string[] = [];
-        let currentChunk = "";
-
-        const lines = text.split("\n");
-        for (const line of lines) {
-            if (currentChunk.length + line.length + 1 > maxLength) {
-                if (currentChunk) {
-                    chunks.push(currentChunk);
-                }
-                currentChunk = line;
-            } else {
-                if (currentChunk) {
-                    currentChunk += "\n" + line;
-                } else {
-                    currentChunk = line;
-                }
-            }
-        }
-
-        if (currentChunk) {
-            chunks.push(currentChunk);
-        }
-
-        return chunks;
-    }
 
     private async handleEndSession(ctx: Context): Promise<void> {
         try {
@@ -435,7 +420,8 @@ export class OpenCodeBot {
                 return;
             }
 
-            stopTypingIndicator();
+            const session = this.opencodeService.getUserSession(userId);
+            if (session) stopTypingIndicator(session.sessionId);
             const success = await this.opencodeService.abortSession(userId);
 
             if (success) {
@@ -563,14 +549,17 @@ export class OpenCodeBot {
     }
 
     private async handleQuestionResponse(ctx: Context, shortId: string): Promise<void> {
+        const userId = ctx.from?.id;
+        const userSession = userId ? this.opencodeService.getUserSession(userId) : undefined;
+        const sid = userSession?.sessionId || "";
+
         try {
             await ctx.answerCallbackQuery();
 
-            // Look up the short ID from the callback map
             const cbData = getQuestionCallback(shortId);
             if (!cbData) {
                 await ctx.editMessageText("❌ Question expired. Please try again.");
-                resetQuestionState();
+                resetQuestionState(cbData?.sessionID || sid);
                 return;
             }
 
@@ -583,7 +572,7 @@ export class OpenCodeBot {
                     console.log("Question reject failed:", res.status);
                 }
                 await ctx.editMessageText("⏭ Question skipped");
-                resetQuestionState();
+                resetQuestionState(sessionID);
                 return;
             }
 
@@ -592,15 +581,13 @@ export class OpenCodeBot {
                     `${ctx.callbackQuery?.message?.text || ""}\n\n✍️ Type your answer and send it as a message.`,
                     { parse_mode: "HTML" }
                 );
-                const userId = ctx.from?.id;
                 if (userId) {
-                    pendingQuestionAnswers.set(userId, { callId: callID, qIdx });
+                    setPendingQuestion(userId, callID, qIdx);
                 }
-                resetQuestionState();
+                resetQuestionState(sessionID);
                 return;
             }
 
-            // Regular option selected — use the label stored in the callback map
             const selectedLabel = label || `Option ${parseInt(action, 10) + 1}`;
 
             const res = await fetch(`${baseUrl}/question/${callID}/reply`, {
@@ -617,13 +604,13 @@ export class OpenCodeBot {
                 `${ctx.callbackQuery?.message?.text || ""}\n\n✅ Selected: <b>${escapeHtml(selectedLabel)}</b>`,
                 { parse_mode: "HTML" }
             );
-            resetQuestionState();
+            resetQuestionState(sessionID);
         } catch (error) {
             console.error("Error handling question response:", error);
             try {
                 await ctx.editMessageText("❌ Failed to respond to question");
             } catch {}
-            resetQuestionState();
+            resetQuestionState(sid);
         }
     }
 
@@ -654,7 +641,7 @@ export class OpenCodeBot {
             const result = await this.opencodeService.updateSessionTitle(userId, newTitle);
 
             if (result.success) {
-                const message = await ctx.reply(`✅ Session renamed to: <b>${newTitle}</b>`, { parse_mode: "HTML" });
+                const message = await ctx.reply(`✅ Session renamed to: <b>${escapeHtml(newTitle)}</b>`, { parse_mode: "HTML" });
                 
                 // Schedule auto-deletion
                 await MessageUtils.scheduleMessageDeletion(
@@ -911,12 +898,9 @@ export class OpenCodeBot {
                 return;
             }
 
-            // Ensure directory exists (create if needed)
-            const saveDir = "/tmp/telegramCoder";
+            const saveDir = this.configService.getMediaTmpLocation();
             if (!fs.existsSync(saveDir)) {
-                console.log(`Creating directory: ${saveDir}`);
                 fs.mkdirSync(saveDir, { recursive: true });
-                console.log(`✓ Directory created: ${saveDir}`);
             }
 
             // Save file

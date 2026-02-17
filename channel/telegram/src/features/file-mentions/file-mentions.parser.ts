@@ -26,22 +26,5 @@ export class FileMentionParser {
         return mentions;
     }
     
-    replace(text: string, replacements: Map<string, string>): string {
-        let result = text;
-        
-        // Sort replacements by position (descending) to avoid offset issues
-        const sorted = Array.from(replacements.entries())
-            .sort((a, b) => b[0].length - a[0].length);
-        
-        for (const [mention, replacement] of sorted) {
-            result = result.replace(mention, replacement);
-        }
-        
-        return result;
-    }
-    
-    hasMentions(text: string): boolean {
-        this.MENTION_PATTERN.lastIndex = 0;
-        return this.MENTION_PATTERN.test(text);
-    }
+
 }

@@ -2,30 +2,52 @@ import type { Context } from "grammy";
 import type { UserSession } from "../../opencode.types.js";
 import { formatAsHtml } from "../utils.js";
 
-let updateMessageId: number | null = null;
-let lastUpdateTime = 0;
-let finalizeTimeout: NodeJS.Timeout | null = null;
-let latestFullText = "";
-let latestCtx: Context | null = null;
-let isStreaming = true;
+interface TextPartState {
+    updateMessageId: number | null;
+    lastUpdateTime: number;
+    finalizeTimeout: NodeJS.Timeout | null;
+    latestFullText: string;
+    latestCtx: Context | null;
+    isStreaming: boolean;
+}
 
-export async function handleTextPart(ctx: Context, text: string, userSession?: UserSession): Promise<void> {
+const sessionTextState = new Map<string, TextPartState>();
+
+function getState(sessionId: string): TextPartState {
+    let state = sessionTextState.get(sessionId);
+    if (!state) {
+        state = {
+            updateMessageId: null,
+            lastUpdateTime: 0,
+            finalizeTimeout: null,
+            latestFullText: "",
+            latestCtx: null,
+            isStreaming: true,
+        };
+        sessionTextState.set(sessionId, state);
+    }
+    return state;
+}
+
+export async function handleTextPart(ctx: Context, text: string, userSession: UserSession): Promise<void> {
     try {
-        const stream = userSession?.stream ?? true;
+        const sessionId = userSession.sessionId;
+        const stream = userSession.stream ?? true;
         const now = Date.now();
+        const state = getState(sessionId);
 
-        if (finalizeTimeout) {
-            clearTimeout(finalizeTimeout);
-            finalizeTimeout = null;
+        if (state.finalizeTimeout) {
+            clearTimeout(state.finalizeTimeout);
+            state.finalizeTimeout = null;
         }
 
-        latestFullText = text;
-        latestCtx = ctx;
-        isStreaming = stream;
+        state.latestFullText = text;
+        state.latestCtx = ctx;
+        state.isStreaming = stream;
 
         if (!stream) {
-            finalizeTimeout = setTimeout(() => {
-                finalizeTextMessage(ctx);
+            state.finalizeTimeout = setTimeout(() => {
+                finalizeTextMessage(sessionId, ctx);
             }, 5000);
             return;
         }
@@ -37,32 +59,34 @@ export async function handleTextPart(ctx: Context, text: string, userSession?: U
 
         const streamingText = `[Streaming] ✍️\n${formatAsHtml(limitedText)}`;
 
-        if (!updateMessageId) {
+        if (!state.updateMessageId) {
             const sentMessage = await ctx.reply(streamingText, { parse_mode: "HTML" });
-            updateMessageId = sentMessage.message_id;
-            lastUpdateTime = now;
+            state.updateMessageId = sentMessage.message_id;
+            state.lastUpdateTime = now;
         } else {
-            const timeSinceLastUpdate = now - lastUpdateTime;
+            const timeSinceLastUpdate = now - state.lastUpdateTime;
             if (timeSinceLastUpdate < 2000) {
-                finalizeTimeout = setTimeout(() => {
-                    finalizeTextMessage(ctx);
+                state.finalizeTimeout = setTimeout(() => {
+                    finalizeTextMessage(sessionId, ctx);
                 }, 5000);
                 return;
             }
 
+            const chatId = ctx.chat?.id;
+            if (!chatId) return;
             try {
                 await ctx.api.editMessageText(
-                    ctx.chat!.id,
-                    updateMessageId,
+                    chatId,
+                    state.updateMessageId,
                     streamingText,
                     { parse_mode: "HTML" }
                 );
             } catch {}
-            lastUpdateTime = now;
+            state.lastUpdateTime = now;
         }
 
-        finalizeTimeout = setTimeout(() => {
-            finalizeTextMessage(ctx);
+        state.finalizeTimeout = setTimeout(() => {
+            finalizeTextMessage(sessionId, ctx);
         }, 5000);
 
     } catch (error) {
@@ -70,20 +94,25 @@ export async function handleTextPart(ctx: Context, text: string, userSession?: U
     }
 }
 
-export async function finalizeTextMessage(ctx?: Context): Promise<void> {
-    if (finalizeTimeout) {
-        clearTimeout(finalizeTimeout);
-        finalizeTimeout = null;
+export async function finalizeTextMessage(sessionId: string, ctx?: Context): Promise<void> {
+    const state = sessionTextState.get(sessionId);
+    if (!state) return;
+
+    if (state.finalizeTimeout) {
+        clearTimeout(state.finalizeTimeout);
+        state.finalizeTimeout = null;
     }
 
-    const msgId = updateMessageId;
-    const savedText = latestFullText;
-    const resolvedCtx = ctx || latestCtx;
-    updateMessageId = null;
-    latestFullText = "";
-    latestCtx = null;
+    const msgId = state.updateMessageId;
+    const savedText = state.latestFullText;
+    const resolvedCtx = ctx || state.latestCtx;
+    state.updateMessageId = null;
+    state.latestFullText = "";
+    state.latestCtx = null;
 
     if (!resolvedCtx) return;
+    const chatId = resolvedCtx.chat?.id;
+    if (!chatId) return;
 
     let finalText = savedText;
     if (finalText.length > 4000) {
@@ -95,7 +124,7 @@ export async function finalizeTextMessage(ctx?: Context): Promise<void> {
 
     if (!finalText.trim()) {
         if (msgId) {
-            try { await resolvedCtx.api.deleteMessage(resolvedCtx.chat!.id, msgId); } catch {}
+            try { await resolvedCtx.api.deleteMessage(chatId, msgId); } catch {}
         }
         return;
     }
@@ -103,16 +132,24 @@ export async function finalizeTextMessage(ctx?: Context): Promise<void> {
     if (msgId) {
         try {
             await resolvedCtx.api.editMessageText(
-                resolvedCtx.chat!.id,
+                chatId,
                 msgId,
                 formatAsHtml(finalText),
                 { parse_mode: "HTML" }
             );
         } catch {
-            try { await resolvedCtx.api.deleteMessage(resolvedCtx.chat!.id, msgId); } catch {}
+            try { await resolvedCtx.api.deleteMessage(chatId, msgId); } catch {}
             try { await resolvedCtx.reply(formatAsHtml(finalText), { parse_mode: "HTML" }); } catch {}
         }
     } else {
         try { await resolvedCtx.reply(formatAsHtml(finalText), { parse_mode: "HTML" }); } catch {}
     }
+}
+
+export function cleanupTextState(sessionId: string): void {
+    const state = sessionTextState.get(sessionId);
+    if (state?.finalizeTimeout) {
+        clearTimeout(state.finalizeTimeout);
+    }
+    sessionTextState.delete(sessionId);
 }

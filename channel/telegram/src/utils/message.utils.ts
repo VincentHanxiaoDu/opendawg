@@ -20,9 +20,12 @@ export class MessageUtils {
             return;
         }
 
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         setTimeout(async () => {
             try {
-                await ctx.api.deleteMessage(ctx.chat!.id, messageId);
+                await ctx.api.deleteMessage(chatId, messageId);
             } catch (error) {
                 console.error('Failed to delete message:', error);
             }

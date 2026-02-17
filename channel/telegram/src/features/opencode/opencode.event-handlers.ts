@@ -35,7 +35,7 @@ import ptyUpdated from "./event-handlers/pty.updated.handler.js";
 import ptyDeleted from "./event-handlers/pty.deleted.handler.js";
 import serverConnected from "./event-handlers/server.connected.handler.js";
 import questionAsked from "./event-handlers/question.asked.handler.js";
-import { escapeHtml } from "./event-handlers/utils.js";
+
 
 /**
  * Handler function signature for processing events
@@ -65,8 +65,7 @@ export const eventHandlers: EventHandlerMap = {
     "message.removed": messageRemoved,
     "message.part.updated": messagePartUpdated,
     "message.part.removed": messagePartRemoved,
-    "permission.updated": permissionUpdated,
-    "permission.asked": permissionUpdated as any,  // v2 event name
+    "permission.asked": permissionUpdated as any,
     "permission.replied": permissionReplied,
     "question.asked": questionAsked as any,
     "session.status": sessionStatus,
@@ -101,22 +100,9 @@ export const eventHandlers: EventHandlerMap = {
     "server.connected": serverConnected,
 };
 
-/**
- * Default handler for events that don't have a specific handler
- * Formats the event with its type and properties
- */
-async function defaultHandler(event: Event, ctx: Context, userSession: UserSession): Promise<string> {
-    const eventType = event.type;
-    const properties = event.properties || {};
+// Legacy event name from v1 SDK — not in the v2 Event type union
+(eventHandlers as Record<string, any>)["permission.updated"] = permissionUpdated;
 
-    const propsStr = JSON.stringify(properties, null, 2);
-    return `🔔 <b>Event:</b> ${escapeHtml(eventType)}\n<pre>${escapeHtml(propsStr)}</pre>`;
-}
-
-/**
- * Process an event through the appropriate handler
- * Returns a message to send to the user, or null to ignore the event
- */
 function extractSessionID(event: Event): string | undefined {
     const props = (event as any).properties;
     if (!props) return undefined;

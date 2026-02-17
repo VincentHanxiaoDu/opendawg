@@ -15,10 +15,11 @@ export default async function sessionIdleHandler(
 ): Promise<string | null> {
     console.log(event.type);
 
-    stopTypingIndicator();
-    await finalizeTextMessage(ctx);
-    await cleanupReasoningMessages(ctx);
-    clearToolCallMessages();
+    const { sessionId } = userSession;
+    stopTypingIndicator(sessionId);
+    await finalizeTextMessage(sessionId, ctx);
+    await cleanupReasoningMessages(sessionId, ctx);
+    clearToolCallMessages(sessionId);
     
     return null;
 }

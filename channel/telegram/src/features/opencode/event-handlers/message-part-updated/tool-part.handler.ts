@@ -1,11 +1,22 @@
 import type { Context } from "grammy";
 import type { UserSession } from "../../opencode.types.js";
-const toolCallMessages = new Map<string, number>();
 
-export let activeQuestionMessageId: number | null = null;
+// Per-session tool call message tracking: sessionId -> (callID -> telegramMessageId)
+const sessionToolMessages = new Map<string, Map<string, number>>();
 
-export function setActiveQuestionMessageId(id: number | null): void {
-    activeQuestionMessageId = id;
+// Per-session active question message tracking
+const sessionQuestionMessageIds = new Map<string, number | null>();
+
+export function getActiveQuestionMessageId(sessionId: string): number | null {
+    return sessionQuestionMessageIds.get(sessionId) ?? null;
+}
+
+export function setActiveQuestionMessageId(sessionId: string, id: number | null): void {
+    if (id === null) {
+        sessionQuestionMessageIds.delete(sessionId);
+    } else {
+        sessionQuestionMessageIds.set(sessionId, id);
+    }
 }
 
 let nextQId = 0;
@@ -19,7 +30,7 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
     try {
         if (part.tool === "question") return;
 
-        const { verbosity, stream } = userSession;
+        const { verbosity, stream, sessionId } = userSession;
 
         if (verbosity < 1) return;
         if (!stream) return;
@@ -39,15 +50,23 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
             if (outputSummary) toolText += `\n→ ${outputSummary}`;
         }
 
-        const existingMsgId = toolCallMessages.get(callID);
+        let toolMessages = sessionToolMessages.get(sessionId);
+        if (!toolMessages) {
+            toolMessages = new Map();
+            sessionToolMessages.set(sessionId, toolMessages);
+        }
+
+        const existingMsgId = toolMessages.get(callID);
 
         if (existingMsgId) {
+            const chatId = ctx.chat?.id;
+            if (!chatId) return;
             try {
-                await ctx.api.editMessageText(ctx.chat!.id, existingMsgId, toolText);
+                await ctx.api.editMessageText(chatId, existingMsgId, toolText);
             } catch {}
         } else {
             const sentMessage = await ctx.reply(toolText);
-            toolCallMessages.set(callID, sentMessage.message_id);
+            toolMessages.set(callID, sentMessage.message_id);
         }
 
     } catch (error) {
@@ -55,8 +74,8 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
     }
 }
 
-export function clearToolCallMessages(): void {
-    toolCallMessages.clear();
+export function clearToolCallMessages(sessionId: string): void {
+    sessionToolMessages.delete(sessionId);
 }
 
 function summarizeArgs(input: any): string {
@@ -86,6 +105,19 @@ export function makeQCallback(sessionID: string, callID: string, qIdx: number, a
     return id;
 }
 
-export function resetQuestionState(): void {
-    activeQuestionMessageId = null;
+export function resetQuestionState(sessionId: string): void {
+    sessionQuestionMessageIds.delete(sessionId);
+}
+
+export function cleanupToolState(sessionId: string): void {
+    sessionToolMessages.delete(sessionId);
+    sessionQuestionMessageIds.delete(sessionId);
+}
+
+export function cleanupCallbackMaps(sessionId: string): void {
+    for (const [key, val] of questionCallbackMap.entries()) {
+        if (val.sessionID === sessionId) {
+            questionCallbackMap.delete(key);
+        }
+    }
 }

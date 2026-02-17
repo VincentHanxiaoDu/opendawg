@@ -3,7 +3,7 @@ import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
 import { escapeHtml } from "./utils.js";
 import {
-    activeQuestionMessageId,
+    getActiveQuestionMessageId,
     setActiveQuestionMessageId,
     makeQCallback,
 } from "./message-part-updated/tool-part.handler.js";
@@ -18,7 +18,7 @@ export default async function questionAskedHandler(
     try {
         const { id: requestID, sessionID, questions } = event.properties;
         if (!questions || questions.length === 0) return null;
-        if (activeQuestionMessageId) return null;
+        if (getActiveQuestionMessageId(userSession.sessionId)) return null;
 
         for (let qIdx = 0; qIdx < questions.length; qIdx++) {
             const q = questions[qIdx];
@@ -54,7 +54,7 @@ export default async function questionAskedHandler(
                 parse_mode: "HTML",
                 reply_markup: { inline_keyboard: rows },
             });
-            setActiveQuestionMessageId(sentMessage.message_id);
+            setActiveQuestionMessageId(userSession.sessionId, sentMessage.message_id);
         }
     } catch (error) {
         console.log("Error in question.asked handler:", error);

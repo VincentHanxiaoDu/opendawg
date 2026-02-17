@@ -14,6 +14,14 @@ export function getPermissionCallback(shortId: string) {
     return permCallbackMap.get(shortId);
 }
 
+export function cleanupPermissionCallbacks(sessionId: string): void {
+    for (const [key, val] of permCallbackMap.entries()) {
+        if (val.sessionID === sessionId) {
+            permCallbackMap.delete(key);
+        }
+    }
+}
+
 function makePermCallback(sessionID: string, permissionID: string, reply: string): string {
     const id = `p${nextPermId++}`;
     permCallbackMap.set(id, { sessionID, permissionID, reply });
@@ -26,12 +34,11 @@ export default async function permissionUpdatedHandler(
     userSession: UserSession
 ): Promise<string | null> {
     try {
-        const permission = event.properties;
+        const permission = event.properties as Record<string, any>;
         const title = permission.title || "Permission request";
         const permissionId = permission.id;
         const sessionId = permission.sessionID;
 
-        // Build metadata display
         let details = "";
         if (permission.metadata) {
             const meta = permission.metadata as Record<string, unknown>;
@@ -41,9 +48,10 @@ export default async function permissionUpdatedHandler(
             if (meta.description) details += `\n${escapeHtml(String(meta.description))}`;
         }
 
-        if (permission.pattern) {
-            const patterns = Array.isArray(permission.pattern) ? permission.pattern : [permission.pattern];
-            details += `\nPattern: <code>${escapeHtml(patterns.join(", "))}</code>`;
+        const patterns = permission.patterns || permission.pattern;
+        if (patterns) {
+            const patternList = Array.isArray(patterns) ? patterns : [patterns];
+            details += `\nPattern: <code>${escapeHtml(patternList.join(", "))}</code>`;
         }
 
         const message = `🔐 <b>${escapeHtml(title)}</b>${details}`;

@@ -5,7 +5,6 @@ import { MessageUtils } from '../utils/message.utils.js';
 export class AccessControlMiddleware {
     private static allowedUserIds: Set<number> | null = null;
     private static adminUserId: number | null = null;
-    private static notifiedUsers: Set<number> = new Set();
     private static configService: ConfigService | null = null;
     private static bot: Bot | null = null;
 

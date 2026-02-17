@@ -1,31 +1,49 @@
 import type { Context } from "grammy";
 import type { UserSession } from "../../opencode.types.js";
 
-let reasoningMessageId: number | null = null;
-let reasoningDeleteTimeout: NodeJS.Timeout | null = null;
+interface ReasoningState {
+    messageId: number | null;
+    deleteTimeout: NodeJS.Timeout | null;
+}
+
+const sessionReasoningState = new Map<string, ReasoningState>();
+
+function getState(sessionId: string): ReasoningState {
+    let state = sessionReasoningState.get(sessionId);
+    if (!state) {
+        state = { messageId: null, deleteTimeout: null };
+        sessionReasoningState.set(sessionId, state);
+    }
+    return state;
+}
 
 export async function handleReasoningPart(ctx: Context, userSession: UserSession): Promise<void> {
     try {
-        const { verbosity, stream } = userSession;
+        const { verbosity, stream, sessionId } = userSession;
 
         if (verbosity < 1) return;
         if (!stream) return;
 
-        if (reasoningDeleteTimeout) {
-            clearTimeout(reasoningDeleteTimeout);
-            reasoningDeleteTimeout = null;
+        const state = getState(sessionId);
+
+        if (state.deleteTimeout) {
+            clearTimeout(state.deleteTimeout);
+            state.deleteTimeout = null;
         }
 
-        if (!reasoningMessageId) {
+        if (!state.messageId) {
             const sentMessage = await ctx.reply("[Thinking] 💭");
-            reasoningMessageId = sentMessage.message_id;
+            state.messageId = sentMessage.message_id;
         }
 
-        reasoningDeleteTimeout = setTimeout(async () => {
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
+        state.deleteTimeout = setTimeout(async () => {
             try {
-                if (reasoningMessageId) {
-                    await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
-                    reasoningMessageId = null;
+                if (state.messageId) {
+                    await ctx.api.deleteMessage(chatId, state.messageId);
+                    state.messageId = null;
                 }
             } catch {}
         }, 2500);
@@ -35,15 +53,29 @@ export async function handleReasoningPart(ctx: Context, userSession: UserSession
     }
 }
 
-export async function cleanupReasoningMessages(ctx: Context): Promise<void> {
-    if (reasoningDeleteTimeout) {
-        clearTimeout(reasoningDeleteTimeout);
-        reasoningDeleteTimeout = null;
+export async function cleanupReasoningMessages(sessionId: string, ctx: Context): Promise<void> {
+    const state = sessionReasoningState.get(sessionId);
+    if (!state) return;
+
+    if (state.deleteTimeout) {
+        clearTimeout(state.deleteTimeout);
+        state.deleteTimeout = null;
     }
-    if (reasoningMessageId) {
-        try {
-            await ctx.api.deleteMessage(ctx.chat!.id, reasoningMessageId);
-        } catch {}
-        reasoningMessageId = null;
+    if (state.messageId) {
+        const chatId = ctx.chat?.id;
+        if (chatId) {
+            try {
+                await ctx.api.deleteMessage(chatId, state.messageId);
+            } catch {}
+        }
+        state.messageId = null;
     }
+}
+
+export function cleanupReasoningState(sessionId: string): void {
+    const state = sessionReasoningState.get(sessionId);
+    if (state?.deleteTimeout) {
+        clearTimeout(state.deleteTimeout);
+    }
+    sessionReasoningState.delete(sessionId);
 }

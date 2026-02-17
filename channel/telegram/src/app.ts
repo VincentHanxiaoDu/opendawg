@@ -120,7 +120,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     console.log(`[TelegramCoder] Received ${signal}, shutting down gracefully...`);
 
     try {
-        // Stop bot
+        opencodeService.stopAllEventStreams();
         await bot.stop();
 
         console.log('[TelegramCoder] ✅ Shutdown complete');

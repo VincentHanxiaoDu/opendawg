@@ -13,11 +13,12 @@ export default async function sessionErrorHandler(
     console.error("session.error:", JSON.stringify(event.properties));
 
     try {
+        if (!userSession.chatId) return null;
         const props = event.properties as any;
         const errorMsg = props?.error || props?.message || JSON.stringify(props);
         const truncated = String(errorMsg).slice(0, 500);
         await ctx.api.sendMessage(
-            userSession.chatId!,
+            userSession.chatId,
             `⚠️ <b>Session Error</b>\n<pre>${escapeHtml(truncated)}</pre>`,
             { parse_mode: "HTML" }
         );

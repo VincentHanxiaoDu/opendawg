@@ -245,11 +245,8 @@ function startBot() {
         process.exit(1);
     });
 
-    // Cross-platform signal handling
     if (isWindows) {
-        // On Windows, use readline to handle Ctrl+C
         if (process.stdin.isTTY) {
-            const readline = require('readline');
             readline.createInterface({
                 input: process.stdin,
                 output: process.stdout
