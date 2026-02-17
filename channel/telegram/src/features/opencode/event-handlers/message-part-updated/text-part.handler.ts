@@ -1,6 +1,10 @@
-import type { Context } from "grammy";
+import { InputFile, type Context } from "grammy";
 import type { UserSession } from "../../opencode.types.js";
 import { formatAsHtml } from "../utils.js";
+
+const STREAM_LINE_LIMIT = 500;
+const FINAL_LINE_LIMIT = 500;
+const TELEGRAM_MSG_CHAR_LIMIT = 4000;
 
 interface TextPartState {
     updateMessageId: number | null;
@@ -53,8 +57,8 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
         }
 
         const lines = text.split('\n');
-        const limitedText = lines.length > 50
-            ? lines.slice(-50).join('\n')
+        const limitedText = lines.length > STREAM_LINE_LIMIT
+            ? lines.slice(-STREAM_LINE_LIMIT).join('\n')
             : text;
 
         const streamingText = `[Streaming] ✍️\n${formatAsHtml(limitedText)}`;
@@ -114,35 +118,41 @@ export async function finalizeTextMessage(sessionId: string, ctx?: Context): Pro
     const chatId = resolvedCtx.chat?.id;
     if (!chatId) return;
 
-    let finalText = savedText;
-    if (finalText.length > 4000) {
-        finalText = '… (truncated)\n' + finalText.split('\n').slice(-50).join('\n');
-        if (finalText.length > 4000) {
-            finalText = finalText.slice(-4000);
-        }
-    }
-
-    if (!finalText.trim()) {
+    if (!savedText.trim()) {
         if (msgId) {
             try { await resolvedCtx.api.deleteMessage(chatId, msgId); } catch {}
         }
         return;
     }
 
+    const lines = savedText.split('\n');
+    const needsFile = lines.length > FINAL_LINE_LIMIT || savedText.length > TELEGRAM_MSG_CHAR_LIMIT;
+
+    if (needsFile) {
+        if (msgId) {
+            try { await resolvedCtx.api.deleteMessage(chatId, msgId); } catch {}
+        }
+        try {
+            const buf = Buffer.from(savedText, "utf-8");
+            await resolvedCtx.api.sendDocument(chatId, new InputFile(buf, "response.txt"));
+        } catch {
+            const truncated = '… (truncated)\n' + lines.slice(-FINAL_LINE_LIMIT).join('\n');
+            const safe = truncated.length > TELEGRAM_MSG_CHAR_LIMIT ? truncated.slice(-TELEGRAM_MSG_CHAR_LIMIT) : truncated;
+            try { await resolvedCtx.reply(formatAsHtml(safe), { parse_mode: "HTML" }); } catch {}
+        }
+        return;
+    }
+
+    const finalHtml = formatAsHtml(savedText);
     if (msgId) {
         try {
-            await resolvedCtx.api.editMessageText(
-                chatId,
-                msgId,
-                formatAsHtml(finalText),
-                { parse_mode: "HTML" }
-            );
+            await resolvedCtx.api.editMessageText(chatId, msgId, finalHtml, { parse_mode: "HTML" });
         } catch {
             try { await resolvedCtx.api.deleteMessage(chatId, msgId); } catch {}
-            try { await resolvedCtx.reply(formatAsHtml(finalText), { parse_mode: "HTML" }); } catch {}
+            try { await resolvedCtx.reply(finalHtml, { parse_mode: "HTML" }); } catch {}
         }
     } else {
-        try { await resolvedCtx.reply(formatAsHtml(finalText), { parse_mode: "HTML" }); } catch {}
+        try { await resolvedCtx.reply(finalHtml, { parse_mode: "HTML" }); } catch {}
     }
 }
 
