@@ -1,33 +1,33 @@
 ---
-name: opencode-agent
-description: Spawn and manage fully-configured opencode CLI sessions. Use when the user wants to launch opencode on a local or remote machine, bootstrap environments with skills from a git repo, set up config-cli auth and vault secrets, or orchestrate opencode agents. Also triggers when the user mentions opencode-agent, spawning agents, remote opencode, or multi-machine orchestration.
+name: opendog-agent
+description: Spawn and manage fully-configured opencode CLI sessions. Use when the user wants to launch opencode on a local or remote machine, bootstrap environments with skills from a git repo, set up config-cli auth and vault secrets, or orchestrate opencode agents. Also triggers when the user mentions opendog-agent, spawning agents, remote opencode, or multi-machine orchestration.
 ---
 
-# opencode-agent
+# opendog-agent
 
 Two scripts, two concerns:
 
 | Script | Purpose | When to run |
 |--------|---------|-------------|
 | **`setup.sh`** | Environment prep — sync skills, config-cli auth, vault secrets, install/update opencode | Once per machine/project, or when environment changes |
-| **`opencode-agent.sh`** | Launch opencode for a task — lightweight, no network calls, no updates | Every task invocation |
+| **`opendog-agent.sh`** | Launch opencode for a task — lightweight, no network calls, no updates | Every task invocation |
 
-**Always run `setup.sh` first**, then use `opencode-agent.sh` for all interactions.
+**Always run `setup.sh` first**, then use `opendog-agent.sh` for all interactions.
 
 ## Execution Method Priority
 
 | Priority | Method | When to use |
 |----------|--------|-------------|
-| **1. SSH direct** | `ssh host "cd /project && bash .../opencode-agent.sh ..."` | SSH available, simple/single-turn tasks, good network |
-| **2. tmux-tty** | `tmux-wrapper.sh` + `opencode-agent.sh` | No reliable SSH, need TTY, multi-turn interaction, or poor network (tmux survives disconnects) |
+| **1. SSH direct** | `ssh host "cd /project && bash .../opendog-agent.sh ..."` | SSH available, simple/single-turn tasks, good network |
+| **2. tmux-tty** | `tmux-wrapper.sh` + `opendog-agent.sh` | No reliable SSH, need TTY, multi-turn interaction, or poor network (tmux survives disconnects) |
 
 **SSH is preferred** for straightforward invocations — no tmux overhead, direct stdout capture. Fall back to tmux for persistent sessions, TTY interaction, or network resilience.
 
 ## CLI vs TUI Mode
 
-`opencode-agent.sh` defaults to **CLI mode** (`opencode run`):
+`opendog-agent.sh` defaults to **CLI mode** (`opencode run`):
 
-- **New session** (no `-s`): uses `--format json` automatically to capture the session ID, prints `[opencode-agent] session=<id>`
+- **New session** (no `-s`): uses `--format json` automatically to capture the session ID, prints `[opendog-agent] session=<id>`
 - **Continue session** (with `-s <id>`): runs `opencode run` normally — no `--format json`
 
 Use `--tui` only when the user explicitly requests interactive exploration.
@@ -54,14 +54,14 @@ Use `--tui` only when the user explicitly requests interactive exploration.
 The session ID is captured on the **first run only**:
 
 ```
-1st run:  opencode-agent.sh "/opendog build the auth module"
+1st run:  opendog-agent.sh "/opendog build the auth module"
           → JSON output (--format json, automatic)
-          → [opencode-agent] session=ses_abc123
+          → [opendog-agent] session=ses_abc123
 
-2nd run:  opencode-agent.sh -s ses_abc123 "/opendog add rate limiting"
+2nd run:  opendog-agent.sh -s ses_abc123 "/opendog add rate limiting"
           → normal output
 
-3rd run:  opencode-agent.sh -s ses_abc123 "/opendog write tests"
+3rd run:  opendog-agent.sh -s ses_abc123 "/opendog write tests"
           → normal output
 ```
 
@@ -83,14 +83,14 @@ bash <skill-path>/scripts/setup.sh \
 ### 2. First task (new session)
 
 ```bash
-bash <skill-path>/scripts/opencode-agent.sh "/opendog implement the login feature"
-# → [opencode-agent] session=ses_abc123
+bash <skill-path>/scripts/opendog-agent.sh "/opendog implement the login feature"
+# → [opendog-agent] session=ses_abc123
 ```
 
 ### 3. Continue the session
 
 ```bash
-bash <skill-path>/scripts/opencode-agent.sh -s ses_abc123 "/opendog add unit tests"
+bash <skill-path>/scripts/opendog-agent.sh -s ses_abc123 "/opendog add unit tests"
 ```
 
 ### Via tmux (when TTY needed)
@@ -104,7 +104,7 @@ bash <skill-path>/scripts/opencode-agent.sh -s ses_abc123 "/opendog add unit tes
   --repo https://github.com/VincentHanxiaoDu/opendog' Enter
 
 # First task
-<tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opencode-agent.sh \
+<tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opendog-agent.sh \
   "/opendog implement the login feature"' Enter
 
 # Capture session ID
@@ -113,7 +113,7 @@ OUTPUT=$(<tmux-skill-path>/tmux-wrapper.sh capture oc)
 SID=$(echo "$OUTPUT" | grep -o 'session=ses_[^ ]*' | tail -1 | cut -d= -f2)
 
 # Continue
-<tmux-skill-path>/tmux-wrapper.sh send oc "bash <skill-path>/scripts/opencode-agent.sh \
+<tmux-skill-path>/tmux-wrapper.sh send oc "bash <skill-path>/scripts/opendog-agent.sh \
   -s $SID \"/opendog add unit tests\"" Enter
 
 # Cleanup
@@ -126,7 +126,7 @@ SID=$(echo "$OUTPUT" | grep -o 'session=ses_[^ ]*' | tail -1 | cut -d= -f2)
 
 ```bash
 bash <skill-path>/scripts/setup.sh --repo https://github.com/VincentHanxiaoDu/opendog
-bash <skill-path>/scripts/opencode-agent.sh --tui
+bash <skill-path>/scripts/opendog-agent.sh --tui
 ```
 
 ### Interact
@@ -178,10 +178,10 @@ bash <skill-path>/scripts/setup.sh [options]
 | `--graphiti-group-id` | `<id>` | Override GRAPHITI_GROUP_ID (default: opendog) |
 | `--graphiti-model` | `<model>` | Override MODEL_NAME for graphiti |
 
-### opencode-agent.sh
+### opendog-agent.sh
 
 ```bash
-bash <skill-path>/scripts/opencode-agent.sh [options] [prompt...]
+bash <skill-path>/scripts/opendog-agent.sh [options] [prompt...]
 ```
 
 | Flag | Arg | Purpose |
@@ -214,7 +214,7 @@ All unrecognized flags pass through to opencode.
 
 ## Pitfalls
 
-- **Run `setup.sh` before `opencode-agent.sh`** — the agent script assumes opencode is installed and env is ready
+- **Run `setup.sh` before `opendog-agent.sh`** — the agent script assumes opencode is installed and env is ready
 - **Always use `-s <id>`, never `-c` for automation** — `-c` picks "last session" globally, breaks with parallel agents
 - **Prefer CLI mode for automation** — structured output, no TUI artifacts
 - **Always `sleep` after `send`** before `capture` — let commands initialize

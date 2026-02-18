@@ -11,7 +11,7 @@ OPENCODE_EXTRA_ARGS=()
 
 show_help() {
   cat <<'EOF'
-Usage: opencode-agent.sh [options] [prompt...]
+Usage: opendog-agent.sh [options] [prompt...]
 
 Launch opencode for a task. Run setup.sh first to prepare the environment.
 
@@ -25,9 +25,9 @@ Options:
 All other arguments are passed through to opencode.
 
 Session workflow:
-  1st run:  opencode-agent.sh "/opendog build auth"
-            → [opencode-agent] session=ses_abc123
-  2nd run:  opencode-agent.sh -s ses_abc123 "/opendog add tests"
+  1st run:  opendog-agent.sh "/opendog build auth"
+            → [opendog-agent] session=ses_abc123
+  2nd run:  opendog-agent.sh -s ses_abc123 "/opendog add tests"
 EOF
 }
 
@@ -43,9 +43,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! command -v opencode &>/dev/null; then
-  echo "[opencode-agent] ERROR: opencode not found. Run setup.sh first."
+  echo "[opendog-agent] ERROR: opencode not found. Run setup.sh first."
   exit 1
 fi
+
+# Enable Exa web search
+export OPENCODE_ENABLE_EXA=1
 
 SESSION_ARGS=()
 if [[ -n "$SESSION_ID" ]]; then
@@ -63,7 +66,7 @@ elif [[ -n "$SESSION_ID" ]] || [[ "$CONTINUE_LAST" = true ]]; then
     ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
     ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}
 else
-  OUTPUT_FILE="${TMPDIR:-/tmp}/opencode-agent-output.$$"
+  OUTPUT_FILE="${TMPDIR:-/tmp}/opendog-agent-output.$$"
   trap 'rm -f "$OUTPUT_FILE"' EXIT
 
   opencode run --format json --log-level "$LOG_LEVEL" \
@@ -73,7 +76,7 @@ else
 
   CAPTURED_SID=$(grep -o '"sessionID":"[^"]*"' "$OUTPUT_FILE" | head -1 | cut -d'"' -f4)
   if [[ -n "$CAPTURED_SID" ]]; then
-    echo "[opencode-agent] session=$CAPTURED_SID"
+    echo "[opendog-agent] session=$CAPTURED_SID"
   fi
 
   exit "$OC_EXIT"
