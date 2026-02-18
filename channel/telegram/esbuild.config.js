@@ -41,6 +41,8 @@ const commonOptions = {
     // Dependencies that shouldn't be bundled (native modules)
     "node-pty",
     "puppeteer",
+    "better-sqlite3",
+    "nanoid",
     // Other dependencies that might have issues when bundled
     "@google/genai",
     "@ai-sdk/google",

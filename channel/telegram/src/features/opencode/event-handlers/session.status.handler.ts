@@ -11,6 +11,8 @@ export default async function sessionStatusHandler(
 ): Promise<string | null> {
     console.log(event.type);
 
+    // serverStatus is updated in processEvent before this handler is called.
+    // Send typing indicator to keep the chat feeling responsive.
     try {
         if (userSession.chatId) {
             await ctx.api.sendChatAction(userSession.chatId, "typing");

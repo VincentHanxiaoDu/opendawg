@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# One-time environment setup for opencode-agent.
+# One-time environment setup for opendog-agent.
 # Run once per machine/project to: sync skills, configure auth, inject secrets, install/update opencode.
-# After setup completes, use opencode-agent.sh for all subsequent interactions.
+# After setup completes, use opendog-agent.sh for all subsequent interactions.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ show_help() {
   cat <<'EOF'
 Usage: setup.sh [options]
 
-One-time environment setup for opencode-agent. Run this before using opencode-agent.sh.
+One-time environment setup for opendog-agent. Run this before using opendog-agent.sh.
 
 Options:
   --repo <url>                  Git repo URL with .opencode/skills/ (required first run)
@@ -47,7 +47,7 @@ done
 
 # --- Step 1: Install skills from repo ---
 if [[ -n "$REPO_URL" ]]; then
-  cache_dir="${TMPDIR:-/tmp}/opencode-agent-repo"
+  cache_dir="${TMPDIR:-/tmp}/opendog-agent-repo"
   echo "[setup] Syncing skills from repo (branch: $REPO_BRANCH)..."
 
   if [[ -d "$cache_dir/.git" ]]; then
@@ -121,7 +121,10 @@ if [[ -n "$GRAPHITI_MODEL" ]]; then
 fi
 export GRAPHITI_GROUP_ID="$GRAPHITI_GROUP_ID"
 
-# --- Step 4: Install or update opencode ---
+# --- Step 4: Enable Exa web search ---
+export OPENCODE_ENABLE_EXA=1
+
+# --- Step 5: Install or update opencode ---
 if ! command -v opencode &>/dev/null; then
   echo "[setup] opencode not found — installing via Homebrew..."
   if command -v brew &>/dev/null; then
@@ -138,4 +141,4 @@ else
 fi
 
 echo "[setup] opencode $(opencode --version 2>/dev/null || echo '?') — ready"
-echo "[setup] Setup complete. Use opencode-agent.sh to run tasks."
+echo "[setup] Setup complete. Use opendog-agent.sh to run tasks."

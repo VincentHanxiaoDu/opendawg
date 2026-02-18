@@ -1,6 +1,7 @@
 import type { Event } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
-import type { UserSession } from "./opencode.types.js";
+import type { UserSession, UserState } from "./opencode.types.js";
+import { escapeHtml } from "./event-handlers/utils.js";
 
 import messageUpdated from "./event-handlers/message.updated.handler.js";
 import messageRemoved from "./event-handlers/message.removed.handler.js";
@@ -113,20 +114,96 @@ function extractSessionID(event: Event): string | undefined {
     return undefined;
 }
 
+/**
+ * Send a brief background notification to the user about a background session event.
+ */
+async function notifyBackgroundSession(
+    event: Event,
+    ctx: Context,
+    userSession: UserSession,
+    messageDeleteTimeout: number
+): Promise<void> {
+    if (!userSession.chatId) return;
+
+    const title = escapeHtml(userSession.session?.title || userSession.sessionId.substring(0, 8));
+    const shortId = userSession.sessionId.substring(0, 8);
+
+    let text: string | null = null;
+
+    if (event.type === "session.idle") {
+        userSession.serverStatus = "idle";
+        text = `✅ <b>${title}</b> done — <code>/session ${shortId}</code> to view`;
+    } else if (event.type === "session.error") {
+        userSession.serverStatus = "error";
+        const props = (event as any).properties;
+        const errMsg = props?.error || props?.message || "";
+        userSession.lastError = errMsg ? String(errMsg).slice(0, 200) : undefined;
+        text = `❌ Error in <b>${title}</b>${errMsg ? ` — ${escapeHtml(String(errMsg).slice(0, 100))}` : ""}\n<code>/session ${shortId}</code> to view`;
+    }
+
+    if (!text) return;
+
+    try {
+        const sent = await ctx.api.sendMessage(userSession.chatId, text, { parse_mode: "HTML" });
+        // Auto-delete if configured
+        if (messageDeleteTimeout > 0) {
+            setTimeout(() => {
+                ctx.api.deleteMessage(userSession.chatId!, sent.message_id).catch(() => {});
+            }, messageDeleteTimeout);
+        }
+    } catch (err) {
+        console.error("Failed to send background session notification:", err);
+    }
+}
+
 export async function processEvent(
     event: Event,
     ctx: Context,
-    userSession: UserSession
+    userState: UserState,
+    messageDeleteTimeout = 0
 ): Promise<void> {
     try {
         const eventSessionID = extractSessionID(event);
-        if (eventSessionID && eventSessionID !== userSession.sessionId) {
+
+        if (eventSessionID) {
+            // Route to matching session
+            const targetSession = userState.sessions.get(eventSessionID);
+            if (!targetSession) {
+                // Not one of our attached sessions — ignore
+                return;
+            }
+
+            // Update serverStatus from status events for any attached session
+            if (event.type === "session.status") {
+                const status = (event as any).properties?.status;
+                if (status === "busy" || status === "idle" || status === "error") {
+                    targetSession.serverStatus = status;
+                }
+            }
+
+            if (targetSession.isActive) {
+                // Active session: full processing
+                const handler = eventHandlers[event.type];
+                if (handler) {
+                    await handler(event as any, ctx, targetSession);
+                }
+            } else {
+                // Background session: light notification only
+                await notifyBackgroundSession(event, ctx, targetSession, messageDeleteTimeout);
+            }
             return;
         }
 
-        const handler = eventHandlers[event.type];
-        if (handler) {
-            await handler(event as any, ctx, userSession);
+        // No session ID — global event: use active session context if available
+        const activeSession = userState.activeSessionId
+            ? userState.sessions.get(userState.activeSessionId)
+            : undefined;
+
+        if (activeSession) {
+            const handler = eventHandlers[event.type];
+            if (handler) {
+                await handler(event as any, ctx, activeSession);
+            }
         }
     } catch (error) {
         console.error(`Error handling event ${event.type}:`, error);

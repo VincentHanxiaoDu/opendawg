@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap and launch opencode in headless server mode.
-# Same environment setup as opencode-agent.sh, but runs `opencode serve`.
+# Same environment setup as opendog-agent.sh, but runs `opencode serve`.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -134,7 +134,7 @@ fi
 install_skills() {
   local repo_url="$1"
   local branch="${2:-main}"
-  local cache_dir="${TMPDIR:-/tmp}/opencode-agent-repo"
+  local cache_dir="${TMPDIR:-/tmp}/opendog-agent-repo"
 
   echo "[opencode-server] Syncing skills from repo (branch: $branch)..."
 
@@ -366,4 +366,5 @@ if [[ ${#DOCKER_PROFILES[@]} -gt 0 ]]; then
 fi
 
 # --- Step 8b: Launch opencode serve ---
+export OPENCODE_ENABLE_EXA=1
 exec opencode serve "${SERVE_ARGS[@]}" ${OPENCODE_EXTRA_ARGS[@]+"${OPENCODE_EXTRA_ARGS[@]}"}

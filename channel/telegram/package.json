@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.3.0",
     "esbuild": "^0.25.11",
     "nodemon": "^3.1.10",
@@ -75,8 +76,10 @@
     "@opencode-ai/sdk": "^1.0.224",
     "ai": "^5.0.30",
     "archiver": "^7.0.1",
+    "better-sqlite3": "^9.6.0",
     "dotenv": "^17.2.2",
     "grammy": "^1.38.2",
+    "nanoid": "^5.1.6",
     "node-pty": "^1.0.0",
     "puppeteer": "^24.25.0",
     "zod": "^4.1.5"
