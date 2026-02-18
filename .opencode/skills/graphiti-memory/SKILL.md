@@ -7,6 +7,15 @@ description: Long-term memory backed by Graphiti knowledge graph — persist and
 
 Persist facts, instructions, observations, and preferences into a Graphiti-powered knowledge graph (Neo4j + LLM). Query knowledge across sessions with semantic search.
 
+Two scripts, two audiences:
+
+| Script | Audience | Capabilities |
+|--------|----------|-------------|
+| **`graphiti-agent.sh`** | AI agents | CRUD per-item: search, remember, delete single episodes/edges. No clear, no service management. |
+| **`graphiti-cli.sh`** | Humans / admin scripts | Full access: everything above + start/stop/status, clear graph, get-edge |
+
+**Agents use `graphiti-agent.sh`**. Humans use `graphiti-cli.sh`.
+
 ## Behavior Rules
 
 ### 1. Search Before Asking
@@ -14,7 +23,7 @@ Persist facts, instructions, observations, and preferences into a Graphiti-power
 When encountering unknown information (user preferences, project conventions, prior decisions), search memory first:
 
 ```bash
-graphiti-cli search "user preference for test framework"
+graphiti-agent search "user preference for test framework"
 ```
 
 Only ask the user if no relevant results are found.
@@ -24,28 +33,30 @@ Only ask the user if no relevant results are found.
 When the user gives explicit instructions, facts, or preferences, store them immediately:
 
 ```bash
-graphiti-cli remember "User prefers pytest over unittest for all Python projects" \
+graphiti-agent remember "User prefers pytest over unittest for all Python projects" \
   --source user-instruction
 ```
 
 ### 3. Rich Metadata
 
-Always include context so facts are unambiguous. The CLI auto-enriches with hostname, cwd, project, and timestamp. Add extra context via flags:
+The scripts auto-enrich with hostname, cwd, project, and timestamp. Add extra context via flags:
 
 ```bash
-graphiti-cli remember "The auth service uses JWT with RS256" \
+graphiti-agent remember "The auth service uses JWT with RS256" \
   --source observation \
   --metadata "component=auth-service" \
   --metadata "confidence=high"
 ```
 
-### 4. Multiple Entries OK
+### 4. Update by Storing New Facts
+
+Graphiti does not support in-place updates. To correct a fact:
+- **Preferred**: Store a new episode with the corrected information — Graphiti's temporal resolution ensures the latest fact wins
+- **Alternative**: Delete the old episode first (`delete-episode <uuid>`), then store the new one
+
+### 5. Multiple Entries OK
 
 Store multiple entries for the same topic — Graphiti handles deduplication and entity resolution automatically.
-
-### 5. Conflict Resolution
-
-When facts change, store the new fact. Graphiti's temporal awareness handles versioning — newer facts take precedence.
 
 ### 6. Secret Injection
 
@@ -58,8 +69,9 @@ For advanced usage or direct tool access, use `mcp call` via the mcp-cli skill:
 ```bash
 mcp call search_memory_facts --params '{"query":"auth","group_ids":["opendog"]}' http://localhost:8000/mcp
 mcp call add_memory --params '{"name":"ep1","episode_body":"fact","group_id":"opendog"}' http://localhost:8000/mcp
-mcp call search_nodes --params '{"query":"auth","group_ids":["opendog"]}' http://localhost:8000/mcp
-mcp call get_episodes --params '{"group_ids":["opendog"],"max_episodes":10}' http://localhost:8000/mcp
+mcp call delete_episode --params '{"uuid":"<uuid>"}' http://localhost:8000/mcp
+mcp call delete_entity_edge --params '{"uuid":"<uuid>"}' http://localhost:8000/mcp
+mcp call clear_graph --params '{"group_ids":["opendog"]}' http://localhost:8000/mcp
 ```
 
 ## Prerequisites
@@ -70,68 +82,78 @@ mcp call get_episodes --params '{"group_ids":["opendog"],"max_episodes":10}' htt
 4. **Docker** with Compose V2
 5. **Azure OpenAI credentials** stored: `config-cli set AZURE_OPENAI_API_KEY <key>` and `config-cli set AZURE_OPENAI_ENDPOINT <url>`
 
-Install graphiti-cli:
+Install:
 ```bash
 bash skills/graphiti-memory/scripts/install.sh
 ```
 
-## Commands
+## Agent Commands (`graphiti-agent.sh`)
+
+| Command | Description |
+|---------|-------------|
+| `graphiti-agent search <query>` | Search facts (semantic) |
+| `graphiti-agent search-nodes <query>` | Search entity nodes |
+| `graphiti-agent remember <text> [flags]` | Store a new episode |
+| `graphiti-agent episodes [--last N]` | List recent episodes (default: 10) |
+| `graphiti-agent get-edge <uuid>` | Get an entity edge by UUID |
+| `graphiti-agent delete-episode <uuid>` | Delete one episode |
+| `graphiti-agent delete-edge <uuid>` | Delete one entity edge |
+
+## Admin Commands (`graphiti-cli.sh`)
+
+All agent commands above, plus:
 
 | Command | Description |
 |---------|-------------|
 | `graphiti-cli start` | Start Neo4j + Graphiti, inject secrets from config-cli |
 | `graphiti-cli stop` | Stop all services |
-| `graphiti-cli status` | Show service status and health |
-| `graphiti-cli search <query>` | Search facts in the knowledge graph |
-| `graphiti-cli search-nodes <query>` | Search entity nodes |
-| `graphiti-cli remember <text> [flags]` | Store a new episode with auto-enriched metadata |
-| `graphiti-cli episodes [--last N]` | List recent episodes (default: 10) |
+| `graphiti-cli status` | Show service status, health, and MCP status |
+| `graphiti-cli clear [--confirm]` | ⚠️ Clear ALL data for the current group |
 
 ## Workflow Examples
 
-### Storing Knowledge
+### Agent: Storing & Querying
 
 ```bash
-# User instruction
-graphiti-cli remember "Always use pnpm instead of npm for this project" \
+graphiti-agent remember "Always use pnpm instead of npm for this project" \
   --source user-instruction
 
-# Technical observation
-graphiti-cli remember "The API rate limit is 100 req/min per key" \
+graphiti-agent remember "The API rate limit is 100 req/min per key" \
   --source observation \
   --metadata "service=api-gateway"
 
-# Debugging insight
-graphiti-cli remember "OOM errors in worker are caused by unbounded queue in BatchProcessor" \
-  --source debugging \
-  --metadata "component=worker" \
-  --metadata "severity=critical"
+graphiti-agent search "package manager preference"
+
+graphiti-agent search-nodes "BatchProcessor"
+
+graphiti-agent episodes --last 20
 ```
 
-### Querying Knowledge
+### Agent: Correcting a Fact
 
 ```bash
-# Semantic search for facts
-graphiti-cli search "package manager preference"
+# Option 1: Just store the correction (temporal resolution handles priority)
+graphiti-agent remember "The API rate limit was increased to 500 req/min" \
+  --source observation
 
-# Search for entity nodes
-graphiti-cli search-nodes "BatchProcessor"
-
-# Recent episodes
-graphiti-cli episodes --last 20
+# Option 2: Delete old, store new
+graphiti-agent delete-episode "c61faa9a-ed5a-4f83-8122-4c630a5d8f48"
+graphiti-agent remember "The API rate limit is 500 req/min per key" \
+  --source observation
 ```
 
-### Service Management
+### Admin: Service Management
 
 ```bash
-# Start (auto-injects Azure OpenAI credentials from config-cli vault)
 graphiti-cli start
-
-# Check health
 graphiti-cli status
-
-# Stop when done
 graphiti-cli stop
+```
+
+### Admin: Wiping Data
+
+```bash
+graphiti-cli clear --confirm
 ```
 
 ## Architecture

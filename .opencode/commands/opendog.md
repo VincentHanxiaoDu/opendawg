@@ -18,7 +18,7 @@ You are the main orchestrating agent. A task has been given to you.
 When multiple approaches can accomplish the same thing, always prefer higher-priority options:
 
 1. **Native tools** — built-in Read, Edit, Write, Grep, Glob, Bash, Task, WebFetch, etc.
-2. **Official scripts/CLI** — `graphiti-cli`, `config-cli`, project scripts in known locations
+2. **Official scripts/CLI** — `graphiti-agent`, `config-cli`, project scripts in known locations
 3. **mcp-cli** — `mcp call <tool> --params '...' <endpoint>` for MCP server tools
 4. **MCP servers directly** — only if mcp-cli is unavailable
 5. **Custom ad-hoc scripts** — last resort; write throwaway scripts only when nothing above works
@@ -49,12 +49,12 @@ Use **graphiti-memory** to persist and retrieve knowledge across sessions.
 - Architectural decisions and their rationale
 
 ```bash
-graphiti-cli remember "<fact>" --source <source-type> --metadata "key=value"
+graphiti-agent remember "<fact>" --source <source-type> --metadata "key=value"
 ```
 
 **Search memory before acting on assumptions**:
 ```bash
-graphiti-cli search "<what you need to know>"
+graphiti-agent search "<what you need to know>"
 ```
 
 **Update dynamically**: When a previously stored fact becomes outdated, store the corrected version. Graphiti's temporal resolution ensures the latest fact wins.
@@ -63,7 +63,7 @@ graphiti-cli search "<what you need to know>"
 
 **NEVER execute operations you don't fully understand.** Follow this escalation strictly:
 
-1. **Search memory** — `graphiti-cli search "<query>"` — maybe you've seen this before
+1. **Search memory** — `graphiti-agent search "<query>"` — maybe you've seen this before
 2. **Search the web** — Use WebFetch / google search tools to look up docs, APIs, error messages
 3. **Ask the user** — Only after both memory and web fail to provide clarity
 

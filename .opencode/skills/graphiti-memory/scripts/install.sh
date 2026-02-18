@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 BIN_DIR="${OPENDOG_ROOT}/.opendog/bin"
 
-echo "=== graphiti-cli installer ==="
+echo "=== graphiti-memory installer ==="
 
 # Check prerequisites
 errors=0
@@ -49,10 +49,13 @@ fi
 # Create bin directory
 mkdir -p "$BIN_DIR"
 
-# Make script executable and symlink
+# Make scripts executable and symlink
 chmod +x "${SCRIPT_DIR}/graphiti-cli.sh"
+chmod +x "${SCRIPT_DIR}/graphiti-agent.sh"
 ln -sf "${SCRIPT_DIR}/graphiti-cli.sh" "${BIN_DIR}/graphiti-cli"
-echo "Symlinked graphiti-cli → ${BIN_DIR}/graphiti-cli"
+ln -sf "${SCRIPT_DIR}/graphiti-agent.sh" "${BIN_DIR}/graphiti-agent"
+echo "Symlinked graphiti-cli  → ${BIN_DIR}/graphiti-cli"
+echo "Symlinked graphiti-agent → ${BIN_DIR}/graphiti-agent"
 
 # Check PATH
 if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
@@ -65,7 +68,11 @@ if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
 fi
 
 echo ""
-echo "Installation complete. Setup steps:"
+echo "Installation complete. Two scripts installed:"
+echo "  graphiti-cli   — Full admin (start/stop/status/clear + all memory ops)"
+echo "  graphiti-agent — Safe agent subset (memory CRUD only, no admin)"
+echo ""
+echo "Setup steps:"
 echo ""
 echo "  1. Store your OpenAI API key:"
 echo "     config-cli set OPENAI_API_KEY sk-proj-your-key"
@@ -80,3 +87,5 @@ echo "  4. Test it:"
 echo "     graphiti-cli remember \"This is a test fact\""
 echo "     graphiti-cli search \"test\""
 echo "     graphiti-cli episodes"
+echo ""
+echo "  Agents should use graphiti-agent instead of graphiti-cli."
