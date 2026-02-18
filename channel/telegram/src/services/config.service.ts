@@ -1,3 +1,5 @@
+import type { DefaultServer } from "./server-registry.service.js";
+
 /**
  * Configuration Service
  * 
@@ -21,6 +23,9 @@ export class ConfigService {
     // System Environment
     private readonly homeDirectory: string;
     private readonly systemEnv: { [key: string]: string };
+
+    // Server Configuration
+    private readonly defaultServers: DefaultServer[];
 
     constructor() {
         // Load and parse Telegram bot tokens
@@ -60,6 +65,47 @@ export class ConfigService {
         // Load system environment
         this.homeDirectory = process.env.HOME || '/tmp';
         this.systemEnv = process.env as { [key: string]: string };
+
+        // Load default servers from environment variables
+        // OPENCODE_SERVER_URLS takes precedence, falls back to OPENCODE_SERVER_URL
+        this.defaultServers = this.parseDefaultServers();
+    }
+
+    private parseDefaultServers(): DefaultServer[] {
+        const urlsEnv = process.env.OPENCODE_SERVER_URLS || '';
+        if (urlsEnv.trim()) {
+            // Format: "url1|name1,url2|name2" or just "url1,url2"
+            return urlsEnv
+                .split(',')
+                .map(entry => entry.trim())
+                .filter(entry => entry.length > 0)
+                .map(entry => {
+                    const pipeIdx = entry.indexOf('|');
+                    if (pipeIdx > 0) {
+                        return { url: entry.substring(0, pipeIdx).trim(), name: entry.substring(pipeIdx + 1).trim() };
+                    }
+                    try {
+                        const parsed = new URL(entry);
+                        return { url: entry, name: parsed.host };
+                    } catch {
+                        return { url: entry, name: entry };
+                    }
+                });
+        }
+
+        // Fallback: OPENCODE_SERVER_URL (legacy single-server variable)
+        const singleUrl = process.env.OPENCODE_SERVER_URL || '';
+        if (singleUrl.trim()) {
+            try {
+                const parsed = new URL(singleUrl.trim());
+                return [{ url: singleUrl.trim(), name: parsed.host }];
+            } catch {
+                return [{ url: singleUrl.trim(), name: 'Default' }];
+            }
+        }
+
+        // Final fallback
+        return [{ url: 'http://localhost:4096', name: 'Local' }];
     }
 
     // Telegram Configuration Getters
@@ -113,6 +159,10 @@ export class ConfigService {
         }
     }
 
+    getDefaultServers(): DefaultServer[] {
+        return [...this.defaultServers];
+    }
+
     // Debug information
     getDebugInfo(): string {
         return `ConfigService:
@@ -122,6 +172,7 @@ export class ConfigService {
   - Auto Kill: ${this.autoKill}
   - Media Location: ${this.mediaTmpLocation}
   - Clean Up Media Dir: ${this.cleanUpMediaDir}
-  - Message Delete Timeout: ${this.messageDeleteTimeout}ms`;
+  - Message Delete Timeout: ${this.messageDeleteTimeout}ms
+  - Default Servers: ${this.defaultServers.map(s => `${s.name}(${s.url})`).join(', ')}`;
     }
 }
