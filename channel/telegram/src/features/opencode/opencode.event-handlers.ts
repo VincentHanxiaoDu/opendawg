@@ -136,9 +136,10 @@ async function notifyBackgroundSession(
     } else if (event.type === "session.error") {
         userSession.serverStatus = "error";
         const props = (event as any).properties;
-        const errMsg = props?.error || props?.message || "";
-        userSession.lastError = errMsg ? String(errMsg).slice(0, 200) : undefined;
-        text = `❌ Error in <b>${title}</b>${errMsg ? ` — ${escapeHtml(String(errMsg).slice(0, 100))}` : ""}\n<code>/session ${shortId}</code> to view`;
+        const rawErr = props?.error || props?.message || props;
+        const errMsg = typeof rawErr === "object" ? JSON.stringify(rawErr) : String(rawErr ?? "");
+        userSession.lastError = errMsg ? errMsg.slice(0, 200) : undefined;
+        text = `❌ Error in <b>${title}</b>${errMsg ? ` — ${escapeHtml(errMsg.slice(0, 100))}` : ""}\n<code>/session ${shortId}</code> to view`;
     }
 
     if (!text) return;
