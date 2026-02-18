@@ -21,3 +21,5 @@ dist/
 
 # Openspec
 openspec/
+.opencode/**/openspec*
+.opencode/**/opsx*

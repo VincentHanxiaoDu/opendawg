@@ -81,6 +81,34 @@ services:
     restart: on-failure
 
   # ============================================================
+  # Cron Scheduler — Cronicle (distributed cron for AI agents)
+  #   Activated by: --cron or --start-all
+  # ============================================================
+  cronicle:
+    build:
+      context: .opencode/skills/cron-scheduler/docker
+      dockerfile: Dockerfile
+    ports:
+      - "${CRONICLE_PORT:-3012}:3012"
+    environment:
+      - CRONICLE_API_KEY=${CRONICLE_API_KEY:-}
+      - CRONICLE_SECRET=${CRONICLE_SECRET:-}
+      - CRONICLE_BASE_URL=${CRONICLE_BASE_URL:-http://localhost:3012}
+      - CRONICLE_ADMIN_PASSWORD=${CRONICLE_ADMIN_PASSWORD:-admin}
+    volumes:
+      - cronicle_data:/opt/cronicle/data
+      - cronicle_logs:/opt/cronicle/logs
+    profiles:
+      - cron
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3012/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: on-failure
+
+  # ============================================================
   # Channel — Telegram (opencode-telegram, pure client)
   #   Activated by: --channel=telegram or --start-all
   #
@@ -119,3 +147,5 @@ volumes:
   neo4j_data:
   config_vault:
   channel_data:
+  cronicle_data:
+  cronicle_logs:
