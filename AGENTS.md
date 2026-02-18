@@ -77,7 +77,7 @@ This order is non-negotiable. Do not guess. Do not run commands hoping they'll w
 | Skill | Purpose |
 |-------|---------|
 | **tmux-tty** | Run anything that needs a TTY (REPLs, interactive CLIs, editors) via isolated tmux sessions |
-| **opencode-agent** | Spawn fully-configured opencode instances (local or remote) via tmux-tty |
+| **opendog-agent** | Spawn fully-configured opencode instances (local or remote) via tmux-tty |
 | **mcp-cli** | Use MCP servers on-demand via CLI without polluting context |
 | **config-cli** | Secure vault for API keys, passwords, tokens (AES-256-CBC encrypted) |
 | **graphiti-memory** | Long-term memory via Graphiti knowledge graph (Neo4j + LLM) |
