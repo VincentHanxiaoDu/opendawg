@@ -43,6 +43,10 @@ export class OpenCodeService {
         return this.userStates.get(userId)!;
     }
 
+    getServerUrl(userId: number): string {
+        return this.getBaseUrl(userId);
+    }
+
     private getBaseUrl(userId: number): string {
         if (this.serverRegistry) {
             const server = this.serverRegistry.getActive(userId);
@@ -157,13 +161,20 @@ export class OpenCodeService {
             if (sessionIdOrPrefix.length < 32) {
                 const listResult = await client.session.list();
                 const sessions = listResult.data ?? [];
-                const matches = sessions.filter((s: any) => s.id.startsWith(sessionIdOrPrefix));
-                if (matches.length === 0) return null;
-                if (matches.length > 1) {
-                    // Return null with a special marker — caller handles ambiguity
-                    throw Object.assign(new Error("AMBIGUOUS"), { matches: matches.map((s: any) => s.id) });
+
+                // Exact match takes priority
+                const exact = sessions.find((s: any) => s.id === sessionIdOrPrefix);
+                if (exact) {
+                    targetSessionId = exact.id;
+                } else {
+                    const matches = sessions.filter((s: any) => s.id.startsWith(sessionIdOrPrefix));
+                    if (matches.length === 0) return null;
+                    if (matches.length > 1) {
+                        // Return null with a special marker — caller handles ambiguity
+                        throw Object.assign(new Error("AMBIGUOUS"), { matches: matches.map((s: any) => s.id) });
+                    }
+                    targetSessionId = matches[0].id;
                 }
-                targetSessionId = matches[0].id;
             }
 
             const result = await client.session.get({ sessionID: targetSessionId });
@@ -369,6 +380,10 @@ export class OpenCodeService {
         }
 
         this.eventAbortControllers.delete(userId);
+    }
+
+    hasEventStream(userId: number): boolean {
+        return this.eventAbortControllers.has(userId);
     }
 
     stopEventStream(userId: number): void {

@@ -137,6 +137,7 @@ async function notifyBackgroundSession(
         userSession.serverStatus = "error";
         const props = (event as any).properties;
         const errMsg = props?.error || props?.message || "";
+        userSession.lastError = errMsg ? String(errMsg).slice(0, 200) : undefined;
         text = `❌ Error in <b>${title}</b>${errMsg ? ` — ${escapeHtml(String(errMsg).slice(0, 100))}` : ""}\n<code>/session ${shortId}</code> to view`;
     }
 

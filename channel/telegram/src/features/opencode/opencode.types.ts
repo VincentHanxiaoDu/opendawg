@@ -17,6 +17,8 @@ export interface UserSession {
     isActive: boolean;
     /** Server-side run status, updated from SSE events */
     serverStatus: "idle" | "busy" | "error";
+    /** Last error message from a session.error event */
+    lastError?: string;
 }
 
 export interface UserState {

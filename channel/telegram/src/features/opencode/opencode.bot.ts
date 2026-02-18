@@ -10,6 +10,11 @@ import { formatAsHtml, escapeHtml, startTypingIndicator, stopTypingIndicator } f
 import { FileMentionService, FileMentionUI } from "../file-mentions/index.js";
 import { resetQuestionState, getQuestionCallback } from "./event-handlers/message-part-updated/tool-part.handler.js";
 import { getPermissionCallback } from "./event-handlers/permission.updated.handler.js";
+import {
+    buildPageKeyboard, parsePageCallback, parseJumpCallback,
+    setPendingJump, consumePendingJump,
+    totalPages, getPageSlice, PAGE_SIZE,
+} from "../../utils/pagination.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -32,7 +37,10 @@ function getPendingQuestion(userId: number): { callId: string; qIdx: number } | 
 }
 
 function timeAgo(ts: number): string {
-    const diff = Math.floor(Date.now() / 1000) - ts;
+    // ts may be seconds or milliseconds — normalise to seconds
+    const tsSeconds = ts > 1e10 ? Math.floor(ts / 1000) : ts;
+    const diff = Math.floor(Date.now() / 1000) - tsSeconds;
+    if (diff < 0) return "just now";
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -78,6 +86,8 @@ export class OpenCodeBot {
         bot.command("verbosity", AccessControlMiddleware.requireAccess, this.handleVerbosity.bind(this));
         bot.command("servers", AccessControlMiddleware.requireAccess, this.handleServers.bind(this));
         bot.command("server", AccessControlMiddleware.requireAccess, this.handleServer.bind(this));
+        bot.command("status", AccessControlMiddleware.requireAccess, this.handleStatus.bind(this));
+        bot.command("model", AccessControlMiddleware.requireAccess, this.handleModel.bind(this));
 
         // Handle keyboard button presses
         bot.hears("⏹️ ESC", AccessControlMiddleware.requireAccess, this.handleEsc.bind(this));
@@ -89,12 +99,27 @@ export class OpenCodeBot {
 
         // Handle permission response buttons (short IDs like p0, p1, p2, ...)
         // Handle question response buttons (short IDs like q0, q1, q2, ...)
+        // Handle pagination buttons (pg:*, pgj:*, pg_noop)
         bot.on("callback_query:data", AccessControlMiddleware.requireAccess, async (ctx) => {
             const data = ctx.callbackQuery.data;
             if (/^p\d+$/.test(data)) {
                 await this.handlePermissionResponse(ctx, data);
             } else if (/^q\d+$/.test(data)) {
                 await this.handleQuestionResponse(ctx, data);
+            } else if (data === "pg_noop") {
+                await ctx.answerCallbackQuery();
+            } else if (data.startsWith("sw:")) {
+                await this.handleSessionSwitchButton(ctx, data.slice(3));
+            } else if (data.startsWith("su:")) {
+                await this.handleServerUseButton(ctx, data.slice(3));
+            } else if (data.startsWith("ml:")) {
+                await this.handleModelListProvider(ctx, data.slice(3));
+            } else if (data.startsWith("ms:")) {
+                await this.handleModelSelect(ctx, data.slice(3));
+            } else if (parsePageCallback(data)) {
+                await this.handlePageTurn(ctx, data);
+            } else if (parseJumpCallback(data)) {
+                await this.handlePageJumpPrompt(ctx, data);
             }
         });
 
@@ -109,6 +134,15 @@ export class OpenCodeBot {
         bot.on("message:text", AccessControlMiddleware.requireAccess, async (ctx, next) => {
             if (ctx.message?.text === "⏹️ ESC" || ctx.message?.text === "⇥ TAB") {
                 return next();
+            }
+            // Check if this is a page-jump reply (user typed a page number)
+            const userId = ctx.from?.id;
+            if (userId) {
+                const listId = consumePendingJump(userId);
+                if (listId) {
+                    await this.handlePageJumpReply(ctx, listId);
+                    return;
+                }
             }
             await this.handleMessageAsPrompt(ctx);
         });
@@ -224,70 +258,91 @@ export class OpenCodeBot {
         }
     }
 
+    // ─── Sessions list builder (shared by /sessions command and page-turn) ────
+
+    private async buildSessionsPage(
+        userId: number,
+        page: number,
+    ): Promise<{ text: string; reply_markup: any } | null> {
+        const userState = this.opencodeService.getUserState(userId);
+        const allServerSessions = await this.opencodeService.getSessions(userId, 9999);
+
+        if (allServerSessions.length === 0) return null;
+
+        const activeServer = this.serverRegistry.getActive(userId);
+        const serverName = activeServer?.name ?? "Unknown";
+        const attachedIds = new Set(userState?.sessions.keys() ?? []);
+        const activeId = userState?.activeSessionId;
+        const allIds = allServerSessions.map(s => s.id);
+
+        // Compute minimum unique prefix against the full list
+        const uniquePrefix = (id: string): string => {
+            for (let len = 8; len <= id.length; len++) {
+                const prefix = id.substring(0, len);
+                if (allIds.filter(other => other.startsWith(prefix)).length === 1) return prefix;
+            }
+            return id;
+        };
+
+        const nPages = totalPages(allServerSessions.length);
+        const safePage = Math.max(0, Math.min(page, nPages - 1));
+        const pageItems = getPageSlice(allServerSessions, safePage);
+
+        const lines: string[] = [];
+        const switchButtons: Array<{ text: string; callback_data: string }> = [];
+
+        pageItems.forEach((s, idx) => {
+            const flag = s.id === activeId ? "●" : attachedIds.has(s.id) ? "○" : "·";
+            const attached = userState?.sessions.get(s.id);
+            const statusIcon = attached
+                ? (attached.serverStatus === "busy" ? "⚡" : attached.serverStatus === "error" ? "❌" : "✅")
+                : "";
+            const shortId = uniquePrefix(s.id);
+            const title = escapeHtml(s.title || "Untitled").substring(0, 28);
+            const agent = attached?.currentAgent ? ` ${escapeHtml(attached.currentAgent)}` : "";
+            const time = timeAgo(s.updated);
+            const lineNum = safePage * PAGE_SIZE + idx + 1;
+            lines.push(`${lineNum}. ${flag} <code>${shortId}</code>  <b>${title}</b>${agent}  ${time}${statusIcon ? " " + statusIcon : ""}`);
+
+            // Switch button — label is truncated title, callback uses unique prefix (≤64 bytes)
+            const btnLabel = (s.title || "Untitled").substring(0, 18) + (s.id === activeId ? " ●" : "");
+            switchButtons.push({ text: btnLabel, callback_data: `sw:${shortId}` });
+        });
+
+        const attachedCount = attachedIds.size;
+        const header = `💬 <b>Sessions — ${escapeHtml(serverName)}</b> (${allServerSessions.length} total, ${attachedCount} attached)\n\n`;
+        const legend = `\n● active  ○ attached  · history`;
+        const text = header + lines.join("\n") + legend;
+
+        // Build keyboard: session switch buttons (2 per row) + pagination row
+        const btnRows: Array<Array<{ text: string; callback_data: string }>> = [];
+        for (let i = 0; i < switchButtons.length; i += 2) {
+            btnRows.push(switchButtons.slice(i, i + 2));
+        }
+        const pageKb = buildPageKeyboard("sessions", safePage, nPages);
+        if (pageKb) btnRows.push(pageKb.inline_keyboard[0]);
+
+        const reply_markup = btnRows.length > 0 ? { inline_keyboard: btnRows } : undefined;
+        return { text, reply_markup };
+    }
+
     private async handleSessions(ctx: Context): Promise<void> {
         try {
             const userId = ctx.from?.id;
             if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
 
-            const text = ctx.message?.text || "";
-            const showAll = text.includes("--all");
-            const limit = showAll ? 9999 : 10;
-
-            const userState = this.opencodeService.getUserState(userId);
-            const serverSessions = await this.opencodeService.getSessions(userId, limit);
-
-            if (serverSessions.length === 0) {
+            const result = await this.buildSessionsPage(userId, 0);
+            if (!result) {
                 const m = await ctx.reply("💬 No sessions found. Use /opencode to start one.");
                 await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
                 return;
             }
 
-            const activeServer = this.serverRegistry.getActive(userId);
-            const serverName = activeServer?.name ?? "Unknown";
-
-            const attachedIds = new Set(userState?.sessions.keys() ?? []);
-            const activeId = userState?.activeSessionId;
-
-            const lines = serverSessions.map(s => {
-                let flag: string;
-                if (s.id === activeId) flag = "●";
-                else if (attachedIds.has(s.id)) flag = "○";
-                else flag = "·";
-
-                const attached = userState?.sessions.get(s.id);
-                let statusIcon = "";
-                if (attached) {
-                    statusIcon = attached.serverStatus === "busy" ? " ⚡busy"
-                        : attached.serverStatus === "error" ? " ❌error"
-                            : " ✅idle";
-                }
-
-                const shortId = s.id.substring(0, 8);
-                const title = escapeHtml(s.title || "Untitled").substring(0, 30);
-                const agent = attached?.currentAgent ? ` ${attached.currentAgent}` : "";
-                const time = timeAgo(s.updated);
-                return `${flag} <code>${shortId}</code>  <b>${title}</b>${escapeHtml(agent)}  ${time}${statusIcon}`;
+            const m = await ctx.reply(result.text, {
+                parse_mode: "HTML",
+                reply_markup: result.reply_markup,
             });
-
-            const attachedCount = attachedIds.size;
-            const header = `💬 <b>Sessions — ${escapeHtml(serverName)}</b> (${attachedCount} attached)\n\n`;
-            const legend = `\n● active  ○ attached  · history only\n/session &lt;id&gt; to switch`;
-
-            const fullText = header + lines.join("\n") + legend;
-
-            // Send as file if too long
-            if (fullText.length > 3800) {
-                const plain = serverSessions.map(s => {
-                    const flag = s.id === activeId ? "●" : attachedIds.has(s.id) ? "○" : "·";
-                    return `${flag} ${s.id.substring(0, 8)}  ${s.title || "Untitled"}  ${timeAgo(s.updated)}`;
-                }).join("\n");
-                const buf = Buffer.from(plain, "utf-8");
-                const m = await ctx.replyWithDocument(new InputFile(buf, "sessions.txt"));
-                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
-            } else {
-                const m = await ctx.reply(fullText, { parse_mode: "HTML" });
-                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
-            }
+            await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("list sessions", error));
         }
@@ -343,6 +398,13 @@ export class OpenCodeBot {
             if (alreadyAttached && targetSessionId) {
                 // Switch to it
                 this.opencodeService.switchSession(userId, targetSessionId);
+                // Ensure SSE stream is running and chatId is set so errors can be delivered
+                if (!this.opencodeService.hasEventStream(userId)) {
+                    this.opencodeService.startEventStream(userId, ctx).catch(e => console.error("Event stream error:", e));
+                }
+                if (ctx.chat?.id) {
+                    this.opencodeService.updateSessionContext(userId, ctx.chat.id, 0);
+                }
                 const session = this.opencodeService.getUserSession(userId)!;
                 const m = await ctx.reply(
                     `✅ Switched to: <b>${escapeHtml(session.session.title || "Untitled")}</b>\n` +
@@ -366,6 +428,13 @@ export class OpenCodeBot {
 
                 // Switch to it now
                 this.opencodeService.switchSession(userId, result.session.sessionId);
+                // Ensure SSE stream is running and chatId is set so errors can be delivered
+                if (!this.opencodeService.hasEventStream(userId)) {
+                    this.opencodeService.startEventStream(userId, ctx).catch(e => console.error("Event stream error:", e));
+                }
+                if (ctx.chat?.id) {
+                    this.opencodeService.updateSessionContext(userId, ctx.chat.id, 0);
+                }
                 const m = await ctx.reply(
                     `✅ Attached to: <b>${escapeHtml(result.session.session.title || "Untitled")}</b>\n` +
                     `Agent: ${escapeHtml(result.session.currentAgent || "build")} | Verbosity: ${result.session.verbosity}\n` +
@@ -493,29 +562,151 @@ export class OpenCodeBot {
     // Server management
     // ─────────────────────────────────────────────
 
+    // ─── Servers list builder (shared by /servers and page-turn) ─────────────
+
+    private buildServersPage(
+        userId: number,
+        page: number,
+    ): { text: string; reply_markup?: any } | null {
+        const servers = this.serverRegistry.listByUserWithDefaults(userId);
+        if (servers.length === 0) return null;
+
+        const nPages = totalPages(servers.length);
+        const safePage = Math.max(0, Math.min(page, nPages - 1));
+        const pageItems = getPageSlice(servers, safePage);
+
+        const lines: string[] = [];
+        const useButtons: Array<{ text: string; callback_data: string }> = [];
+
+        pageItems.forEach((s, idx) => {
+            const flag = s.isActive ? "●" : "·";
+            const lineNum = safePage * PAGE_SIZE + idx + 1;
+            lines.push(`${lineNum}. ${flag} <code>${s.id}</code>  <b>${escapeHtml(s.name)}</b>\n   ${escapeHtml(s.url)}`);
+            const btnLabel = (s.isActive ? "● " : "↩ ") + s.name.substring(0, 20);
+            useButtons.push({ text: btnLabel, callback_data: `su:${s.id}` });
+        });
+
+        const text = `🖥️ <b>Servers (${servers.length})</b>\n\n${lines.join("\n\n")}\n\n● active  /server add &lt;url&gt; [name] to add`;
+
+        const btnRows: Array<Array<{ text: string; callback_data: string }>> = [];
+        for (let i = 0; i < useButtons.length; i += 2) {
+            btnRows.push(useButtons.slice(i, i + 2));
+        }
+        const pageKb = buildPageKeyboard("servers", safePage, nPages);
+        if (pageKb) btnRows.push(pageKb.inline_keyboard[0]);
+
+        const reply_markup = btnRows.length > 0 ? { inline_keyboard: btnRows } : undefined;
+        return { text, reply_markup };
+    }
+
     private async handleServers(ctx: Context): Promise<void> {
         try {
             const userId = ctx.from?.id;
             if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
 
-            const servers = this.serverRegistry.listByUserWithDefaults(userId);
-
-            if (servers.length === 0) {
+            const result = this.buildServersPage(userId, 0);
+            if (!result) {
                 const m = await ctx.reply("🖥️ No servers configured. Use /server add &lt;url&gt; [name]", { parse_mode: "HTML" });
                 await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
                 return;
             }
 
-            const lines = servers.map(s => {
-                const flag = s.isActive ? "●" : "·";
-                return `${flag} <code>${s.id}</code>  <b>${escapeHtml(s.name)}</b>\n   ${escapeHtml(s.url)}`;
+            const m = await ctx.reply(result.text, {
+                parse_mode: "HTML",
+                reply_markup: result.reply_markup,
             });
-
-            const msg = `🖥️ <b>Servers (${servers.length})</b>\n\n${lines.join("\n\n")}\n\n● active\n/server use &lt;id&gt; to switch\n/server add &lt;url&gt; [name] to add`;
-            const m = await ctx.reply(msg, { parse_mode: "HTML" });
             await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("list servers", error));
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // Pagination callbacks
+    // ─────────────────────────────────────────────
+
+    /** User clicked ◀ or ▶ — edit the existing message in place */
+    private async handlePageTurn(ctx: Context, data: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+            const parsed = parsePageCallback(data);
+            if (!parsed) return;
+            const userId = ctx.from?.id;
+            if (!userId) return;
+
+            const { listId, page } = parsed;
+            let result: { text: string; reply_markup?: any } | null = null;
+
+            if (listId === "sessions") {
+                result = await this.buildSessionsPage(userId, page);
+            } else if (listId === "servers") {
+                result = this.buildServersPage(userId, page);
+            }
+
+            if (!result) return;
+
+            await ctx.editMessageText(result.text, {
+                parse_mode: "HTML",
+                reply_markup: result.reply_markup,
+            });
+        } catch (error) {
+            console.error("Page turn error:", error);
+        }
+    }
+
+    /** User clicked the centre "N/M" button — ask them to type a page number */
+    private async handlePageJumpPrompt(ctx: Context, data: string): Promise<void> {
+        try {
+            const listId = parseJumpCallback(data);
+            if (!listId) { await ctx.answerCallbackQuery(); return; }
+            const userId = ctx.from?.id;
+            if (!userId) { await ctx.answerCallbackQuery(); return; }
+
+            setPendingJump(userId, listId);
+            await ctx.answerCallbackQuery("Type a page number and send it");
+            await ctx.reply("📄 Type the page number to jump to:", {
+                reply_markup: { force_reply: true, selective: true },
+            });
+        } catch (error) {
+            console.error("Page jump prompt error:", error);
+        }
+    }
+
+    /** User replied with a page number after clicking the centre button */
+    private async handlePageJumpReply(ctx: Context, listId: string): Promise<void> {
+        try {
+            const userId = ctx.from?.id;
+            if (!userId) return;
+
+            const text = ctx.message?.text?.trim() || "";
+            const page = parseInt(text, 10) - 1; // convert 1-indexed to 0-indexed
+
+            if (isNaN(page) || page < 0) {
+                const m = await ctx.reply("❌ Invalid page number.");
+                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                return;
+            }
+
+            let result: { text: string; reply_markup?: any } | null = null;
+            if (listId === "sessions") {
+                result = await this.buildSessionsPage(userId, page);
+            } else if (listId === "servers") {
+                result = this.buildServersPage(userId, page);
+            }
+
+            if (!result) {
+                const m = await ctx.reply("❌ Nothing to show.");
+                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                return;
+            }
+
+            const m = await ctx.reply(result.text, {
+                parse_mode: "HTML",
+                reply_markup: result.reply_markup,
+            });
+            await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+        } catch (error) {
+            console.error("Page jump reply error:", error);
         }
     }
 
@@ -644,6 +835,327 @@ export class OpenCodeBot {
             { parse_mode: "HTML" }
         );
         await MessageUtils.scheduleMessageDeletion(ctx, statusMsg.message_id, this.configService.getMessageDeleteTimeout());
+    }
+
+    // ─────────────────────────────────────────────
+    // Inline button handlers for session/server lists
+    // ─────────────────────────────────────────────
+
+    /** Called when user taps a session switch button in /sessions list */
+    private async handleSessionSwitchButton(ctx: Context, prefix: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+            const userId = ctx.from?.id;
+            if (!userId) return;
+
+            // Check if already attached (exact or prefix match)
+            const userState = this.opencodeService.getUserState(userId);
+            let targetSessionId: string | null = null;
+
+            if (userState) {
+                // Exact match first
+                for (const [sid] of userState.sessions) {
+                    if (sid === prefix) { targetSessionId = sid; break; }
+                }
+                // Prefix match
+                if (!targetSessionId) {
+                    for (const [sid] of userState.sessions) {
+                        if (sid.startsWith(prefix)) { targetSessionId = sid; break; }
+                    }
+                }
+            }
+
+            if (targetSessionId) {
+                // Already attached — just switch
+                this.opencodeService.switchSession(userId, targetSessionId);
+            } else {
+                // Attach from server
+                const result = await this.opencodeService.attachSession(userId, prefix);
+                if (!result) {
+                    await ctx.reply(`❌ Session not found: <code>${escapeHtml(prefix)}</code>`, { parse_mode: "HTML" });
+                    return;
+                }
+                targetSessionId = result.session.sessionId;
+                this.opencodeService.switchSession(userId, targetSessionId);
+            }
+
+            // Ensure SSE stream running and chatId is set
+            if (!this.opencodeService.hasEventStream(userId)) {
+                this.opencodeService.startEventStream(userId, ctx).catch(e => console.error("Event stream error:", e));
+            }
+            const chatId = ctx.chat?.id ?? ctx.callbackQuery?.message?.chat.id;
+            if (chatId) {
+                this.opencodeService.updateSessionContext(userId, chatId, 0);
+            }
+
+            const session = this.opencodeService.getUserSession(userId)!;
+            const title = escapeHtml(session.session.title || "Untitled");
+            const m = await ctx.reply(
+                `✅ Switched to: <b>${title}</b>\nAgent: ${escapeHtml(session.currentAgent || "build")} | Verbosity: ${session.verbosity}\nLast active: ${timeAgo(session.session.time.updated)}\nUse /history to see recent messages`,
+                { parse_mode: "HTML" }
+            );
+            await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+        } catch (error) {
+            await ctx.reply(ErrorUtils.createErrorMessage("switch session", error));
+        }
+    }
+
+    /** Called when user taps a "↩ use" button in /servers list */
+    private async handleServerUseButton(ctx: Context, serverId: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+            const userId = ctx.from?.id;
+            if (!userId) return;
+
+            const record = this.serverRegistry.getById(userId, serverId);
+            if (!record) {
+                await ctx.reply(`❌ Server not found: <code>${escapeHtml(serverId)}</code>`, { parse_mode: "HTML" });
+                return;
+            }
+
+            if (record.isActive) {
+                const m = await ctx.reply(`ℹ️ Already using server: <b>${escapeHtml(record.name)}</b>`, { parse_mode: "HTML" });
+                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                return;
+            }
+
+            const statusMsg = await ctx.reply(`🔄 Switching to <b>${escapeHtml(record.name)}</b>...`, { parse_mode: "HTML" });
+            await this.opencodeService.switchServer(userId, record.id, ctx);
+            await ctx.api.editMessageText(
+                statusMsg.chat.id,
+                statusMsg.message_id,
+                `✅ Switched to server: <b>${escapeHtml(record.name)}</b>\n${escapeHtml(record.url)}\nSessions cleared. Use /sessions to list available sessions.`,
+                { parse_mode: "HTML" }
+            );
+            await MessageUtils.scheduleMessageDeletion(ctx, statusMsg.message_id, this.configService.getMessageDeleteTimeout());
+        } catch (error) {
+            await ctx.reply(ErrorUtils.createErrorMessage("switch server", error));
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // /status command
+    // ─────────────────────────────────────────────
+
+    private async handleStatus(ctx: Context): Promise<void> {
+        try {
+            const userId = ctx.from?.id;
+            if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
+
+            const activeServer = this.serverRegistry.getActive(userId);
+            const userState = this.opencodeService.getUserState(userId);
+            const session = this.opencodeService.getUserSession(userId);
+            const sseRunning = this.opencodeService.hasEventStream(userId);
+
+            const lines: string[] = ["📊 <b>Status</b>", ""];
+
+            // Server
+            if (activeServer) {
+                lines.push(`🖥️ <b>Server:</b> ${escapeHtml(activeServer.name)}`);
+                lines.push(`   ${escapeHtml(activeServer.url)}`);
+            } else {
+                lines.push(`🖥️ <b>Server:</b> (default) ${escapeHtml(process.env.OPENCODE_SERVER_URL || "http://localhost:4096")}`);
+            }
+
+            lines.push("");
+
+            // Session
+            if (session) {
+                const shortId = session.sessionId.substring(0, 8);
+                lines.push(`💬 <b>Session:</b> <code>${shortId}</code> — <b>${escapeHtml(session.session.title || "Untitled")}</b>`);
+                lines.push(`   Agent: ${escapeHtml(session.currentAgent || "build")} | Verbosity: ${session.verbosity} | Stream: ${session.stream ? "on" : "off"}`);
+                lines.push(`   Last active: ${timeAgo(session.session.time.updated)}`);
+                if (session.serverStatus === "error" && session.lastError) {
+                    lines.push(`   ❌ Error: ${escapeHtml(session.lastError)}`);
+                }
+            } else {
+                lines.push(`💬 <b>Session:</b> None (use /opencode to start)`);
+            }
+
+            lines.push("");
+
+            // SSE
+            lines.push(`📡 <b>Event stream:</b> ${sseRunning ? "✅ connected" : "⚠️ not running"}`);
+
+            // Attached sessions count
+            const attachedCount = userState?.sessions.size ?? 0;
+            lines.push(`📎 <b>Attached sessions:</b> ${attachedCount}`);
+
+            const m = await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+            await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+        } catch (error) {
+            await ctx.reply(ErrorUtils.createErrorMessage("show status", error));
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // /model command — browse providers → models → select
+    // ─────────────────────────────────────────────
+
+    private async handleModel(ctx: Context): Promise<void> {
+        try {
+            const userId = ctx.from?.id;
+            if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
+
+            const text = (ctx.message?.text || "").replace("/model", "").trim();
+            const baseUrl = this.opencodeService.getServerUrl(userId);
+            const client = createOpencodeClient({ baseUrl });
+
+            // If arg provided directly (e.g. /model anthropic/claude-opus-4-5) → set immediately
+            if (text && text.includes("/")) {
+                await this.setModel(ctx, userId, text);
+                return;
+            }
+
+            // No arg → show current model + connected providers as buttons
+            const [configResp, providerResp] = await Promise.all([
+                client.config.get(),
+                client.provider.list(),
+            ]);
+
+            const cfg = (configResp as any)?.data ?? configResp;
+            const currentModel: string = cfg?.model || cfg?.default?.model || "not set";
+            const smallModel: string | undefined = cfg?.small_model || cfg?.default?.small_model;
+
+            const provData = (providerResp as any)?.data ?? providerResp;
+            const allProviders: any[] = provData?.all ?? [];
+            const connected: string[] = provData?.connected ?? [];
+
+            const lines = [
+                "🤖 <b>Model Selection</b>",
+                "",
+                `<b>Current:</b> <code>${escapeHtml(currentModel)}</code>`,
+            ];
+            if (smallModel) {
+                lines.push(`<b>Small model:</b> <code>${escapeHtml(smallModel)}</code>`);
+            }
+            lines.push("", "Tap a provider to browse its models:");
+
+            // Build provider buttons — connected first, then others
+            const connectedProviders = allProviders.filter(p => connected.includes(p.id));
+            const otherProviders = allProviders.filter(p => !connected.includes(p.id));
+            const ordered = [...connectedProviders, ...otherProviders];
+
+            const btnRows: Array<Array<{ text: string; callback_data: string }>> = [];
+            for (let i = 0; i < ordered.length; i += 2) {
+                const row = ordered.slice(i, i + 2).map(p => {
+                    const label = (connected.includes(p.id) ? "✅ " : "") + p.name.substring(0, 20);
+                    return { text: label, callback_data: `ml:${p.id}` };
+                });
+                btnRows.push(row);
+            }
+
+            if (btnRows.length === 0) {
+                lines.push("", "⚠️ No providers found. Check server configuration.");
+            }
+
+            const m = await ctx.reply(lines.join("\n"), {
+                parse_mode: "HTML",
+                reply_markup: btnRows.length > 0 ? { inline_keyboard: btnRows } : undefined,
+            });
+            await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+        } catch (error) {
+            await ctx.reply(ErrorUtils.createErrorMessage("model command", error));
+        }
+    }
+
+    /** User tapped a provider button → show its models */
+    private async handleModelListProvider(ctx: Context, providerID: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+            const userId = ctx.from?.id;
+            if (!userId) return;
+
+            const baseUrl = this.opencodeService.getServerUrl(userId);
+            const client = createOpencodeClient({ baseUrl });
+
+            const providerResp = await client.provider.list();
+            const provData = (providerResp as any)?.data ?? providerResp;
+            const allProviders: any[] = provData?.all ?? [];
+            const connected: string[] = provData?.connected ?? [];
+
+            const provider = allProviders.find(p => p.id === providerID);
+            if (!provider) {
+                await ctx.reply(`❌ Provider not found: <code>${escapeHtml(providerID)}</code>`, { parse_mode: "HTML" });
+                return;
+            }
+
+            const models: Array<{ id: string; name: string; status?: string }> = Object.values(provider.models ?? {});
+            // Filter out deprecated, sort by name
+            const active = models
+                .filter(m => m.status !== "deprecated")
+                .sort((a, b) => a.name.localeCompare(b.name));
+
+            if (active.length === 0) {
+                await ctx.reply(`⚠️ No active models found for ${escapeHtml(provider.name)}.`);
+                return;
+            }
+
+            const isConnected = connected.includes(providerID);
+            const header = `🤖 <b>${escapeHtml(provider.name)} models</b>${isConnected ? " ✅" : " (not authenticated)"}\n\nTap to select:`;
+
+            // Show up to 20 models as buttons (2 per row)
+            const displayed = active.slice(0, 20);
+            const btnRows: Array<Array<{ text: string; callback_data: string }>> = [];
+            for (let i = 0; i < displayed.length; i += 2) {
+                const row = displayed.slice(i, i + 2).map(m => {
+                    // callback_data: ms:<providerID>/<modelID>  — keep under 64 bytes
+                    const cbData = `ms:${providerID}/${m.id}`;
+                    const label = m.name.substring(0, 22);
+                    return { text: label, callback_data: cbData.substring(0, 64) };
+                });
+                btnRows.push(row);
+            }
+
+            if (active.length > 20) {
+                btnRows.push([{ text: `… ${active.length - 20} more — use /model <id>`, callback_data: "pg_noop" }]);
+            }
+
+            await ctx.editMessageText(header, {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: btnRows },
+            });
+        } catch (error) {
+            console.error("handleModelListProvider error:", error);
+            await ctx.reply(ErrorUtils.createErrorMessage("list models", error));
+        }
+    }
+
+    /** User tapped a model button → set it */
+    private async handleModelSelect(ctx: Context, providerModel: string): Promise<void> {
+        try {
+            await ctx.answerCallbackQuery();
+            const userId = ctx.from?.id;
+            if (!userId) return;
+            await this.setModel(ctx, userId, providerModel);
+        } catch (error) {
+            console.error("handleModelSelect error:", error);
+            await ctx.reply(ErrorUtils.createErrorMessage("set model", error));
+        }
+    }
+
+    /** Shared helper: call config.update to set the model */
+    private async setModel(ctx: Context, userId: number, providerModel: string): Promise<void> {
+        const baseUrl = this.opencodeService.getServerUrl(userId);
+        const client = createOpencodeClient({ baseUrl });
+        try {
+            await (client.config as any).update({ model: providerModel });
+            const text = `✅ Model set to: <code>${escapeHtml(providerModel)}</code>`;
+            // If we're in a callback query, edit the message; otherwise reply
+            if (ctx.callbackQuery) {
+                await ctx.editMessageText(text, { parse_mode: "HTML" });
+            } else {
+                const m = await ctx.reply(text, { parse_mode: "HTML" });
+                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+            }
+        } catch (err: any) {
+            const errText = `❌ Failed to set model: ${escapeHtml(err?.message || String(err))}`;
+            if (ctx.callbackQuery) {
+                await ctx.editMessageText(errText, { parse_mode: "HTML" });
+            } else {
+                await ctx.reply(errText, { parse_mode: "HTML" });
+            }
+        }
     }
 
     // ─────────────────────────────────────────────
