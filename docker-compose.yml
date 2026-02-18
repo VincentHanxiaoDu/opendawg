@@ -83,18 +83,34 @@ services:
   # ============================================================
   # Channel — Telegram (opencode-telegram, pure client)
   #   Activated by: --channel=telegram or --start-all
+  #
+  # NOTE: Uses network_mode: "host" so the container shares the
+  # host network stack. This enables VPN/overlay networking from
+  # the host to reach opencode servers on remote machines.
+  #
+  # macOS limitation: Docker Desktop on macOS runs containers in a
+  # Linux VM, so host networking behaves differently. On macOS,
+  # OPENCODE_SERVER_URLS may need to point to the VM gateway
+  # (e.g., host.docker.internal) instead of localhost.
   # ============================================================
   channel-telegram:
     build:
       context: .
       dockerfile: Dockerfile.channel-telegram
+    network_mode: "host"
     environment:
       # Map our env var names → telegramcoder expected names
       - TELEGRAM_BOT_TOKENS=${TELEGRAM_BOT_TOKEN}
       - ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
       - ADMIN_USER_ID=${ADMIN_USER_ID:-}
       - MESSAGE_DELETE_TIMEOUT=${TELEGRAM_MESSAGE_DELETE_TIMEOUT:-0}
-      - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://host.docker.internal:4096}
+      # OPENCODE_SERVER_URLS: comma-separated list of servers, format: url|name,url2|name2
+      # With host networking, localhost reaches the host machine directly (Linux).
+      # Fallback: OPENCODE_SERVER_URL (single server, legacy)
+      - OPENCODE_SERVER_URLS=${OPENCODE_SERVER_URLS:-}
+      - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+    volumes:
+      - channel_data:/data
     profiles:
       - telegram
     restart: on-failure
@@ -102,3 +118,4 @@ services:
 volumes:
   neo4j_data:
   config_vault:
+  channel_data:

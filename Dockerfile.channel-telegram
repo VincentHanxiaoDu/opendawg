@@ -10,7 +10,7 @@ WORKDIR /app
 # Copy local patched source (pure client — no auto-spawn)
 COPY channel/telegram/ .
 
-RUN npm install && npm run build:prod
+RUN npm install && npm rebuild better-sqlite3 && npm run build:prod
 
 # Health check: verify the node process is running
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \

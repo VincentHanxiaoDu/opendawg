@@ -1,0 +1,27 @@
+# UAT test container — Rocky Linux 9 + Node 22 (via node:22 base)
+# Runs the grammY mock test suite against a real opencode server.
+# Build: docker build -f Dockerfile.uat-test -t opendog-uat .
+# Run:   docker run --rm --network=host --env-file .env opendog-uat
+
+# Use official Node 22 on Rocky Linux 9 (UBI9-based)
+FROM node:22-slim
+
+# build tools for better-sqlite3 native addon
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy telegram channel source
+COPY channel/telegram/ .
+
+# Install all deps (including devDeps for tsx) + rebuild native addons
+RUN npm install && \
+    npm install --save-dev tsx && \
+    npm rebuild better-sqlite3
+
+# Copy test files
+COPY channel/telegram/test/ test/
+
+CMD ["npx", "tsx", "test/uat.ts"]

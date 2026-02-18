@@ -1,5 +1,6 @@
 import { Bot } from "grammy";
 import { ConfigService } from './services/config.service.js';
+import { ServerRegistry } from './services/server-registry.service.js';
 import { OpenCodeService } from './features/opencode/opencode.service.js';
 import { OpenCodeBot } from './features/opencode/opencode.bot.js';
 import { AccessControlMiddleware } from './middleware/access-control.middleware.js';
@@ -36,8 +37,11 @@ console.log(`[TelegramCoder] Initializing with token: ${botToken.substring(0, 10
 // Create bot instance
 const bot = new Bot(botToken);
 
+// Initialize server registry (SQLite-backed, falls back to memory)
+const serverRegistry = new ServerRegistry(configService.getDefaultServers());
+
 // Initialize services
-const opencodeService = new OpenCodeService();
+const opencodeService = new OpenCodeService(undefined, serverRegistry);
 
 // Set global error handler to prevent crashes
 bot.catch((err) => {
@@ -52,7 +56,7 @@ AccessControlMiddleware.setConfigService(configService);
 AccessControlMiddleware.setBot(bot);
 
 // Initialize the OpenCode bot
-const opencodeBot = new OpenCodeBot(opencodeService, configService);
+const opencodeBot = new OpenCodeBot(opencodeService, configService, serverRegistry);
 
 // Register handlers
 opencodeBot.registerHandlers(bot);
@@ -85,11 +89,17 @@ async function startBot() {
             await bot.api.setMyCommands([
                 { command: 'start', description: 'Show help message' },
                 { command: 'help', description: 'Show help message' },
-                { command: 'opencode', description: 'Start an OpenCode session' },
+                { command: 'opencode', description: 'Start a new OpenCode session' },
+                { command: 'sessions', description: 'List sessions with status flags' },
+                { command: 'session', description: 'Switch to or attach a session' },
+                { command: 'history', description: 'Show recent messages in current session' },
+                { command: 'detach', description: 'Detach from current session' },
                 { command: 'rename', description: 'Rename current session' },
-                { command: 'endsession', description: 'End your OpenCode session' },
+                { command: 'endsession', description: 'End current session' },
+                { command: 'servers', description: 'List configured opencode servers' },
+                { command: 'server', description: 'Manage servers: add/remove/use' },
                 { command: 'esc', description: 'Abort current AI operation' },
-                { command: 'verbosity', description: 'Set detail level [0-3] [stream:0/1]' }
+                { command: 'verbosity', description: 'Set detail level [0-3] [stream:0/1]' },
             ]);
             console.log('[TelegramCoder] ✅ Bot commands registered');
         } catch (error) {
@@ -121,6 +131,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
     try {
         opencodeService.stopAllEventStreams();
+        serverRegistry.close();
         await bot.stop();
 
         console.log('[TelegramCoder] ✅ Shutdown complete');
