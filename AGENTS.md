@@ -81,6 +81,7 @@ This order is non-negotiable. Do not guess. Do not run commands hoping they'll w
 | **mcp-cli** | Use MCP servers on-demand via CLI without polluting context |
 | **config-cli** | Secure vault for API keys, passwords, tokens (AES-256-CBC encrypted) |
 | **graphiti-memory** | Long-term memory via Graphiti knowledge graph (Neo4j + LLM) |
+| **cron-scheduler** | Distributed cron scheduling via Cronicle — create, manage, and monitor scheduled jobs for AI agents |
 | **openspec** | Spec-driven development — structured planning with proposals, delta specs, designs, and tasks before writing code |
 
 **Availability**: config-cli and graphiti-memory require their services to be running. If a skill fails, note it and proceed without it — don't block the task.
