@@ -16,6 +16,7 @@ export default async function sessionErrorHandler(
         if (!userSession.chatId) return null;
         const props = event.properties as any;
         const errorMsg = props?.error || props?.message || JSON.stringify(props);
+        userSession.lastError = String(errorMsg).slice(0, 200);
         const truncated = String(errorMsg).slice(0, 500);
         await ctx.api.sendMessage(
             userSession.chatId,
