@@ -339,7 +339,7 @@ async function runTests(): Promise<void> {
       {
         const r = await send(bot, calls, TEST_USER, "/endsession");
         const text = r.lastText || "";
-        const ok = text.includes("ended") || text.includes("Switched") || text.includes("Failed");
+        const ok = text.includes("ended") || text.includes("Failed");
         assert(ok, "/endsession → session ended");
       }
     }
