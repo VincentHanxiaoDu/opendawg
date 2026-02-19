@@ -18,18 +18,18 @@ Use this skill when you need to:
 
 ## Prerequisites
 
-The `mcp` CLI must be installed at `.opendog/bin/mcp` (project root). If not present:
+The `mcp` CLI must be installed at `.opendawg/bin/mcp` (project root). If not present:
 
 ```bash
-# Clone and build (install to project-level .opendog/bin/)
+# Clone and build (install to project-level .opendawg/bin/)
 cd "${TMPDIR:-/tmp}" && git clone --depth 1 https://github.com/f/mcptools.git
-OPENDOG_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd mcptools && CGO_ENABLED=0 go build -o "${OPENDOG_ROOT}/.opendog/bin/mcp" ./cmd/mcptools
+OPENDAWG_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd mcptools && CGO_ENABLED=0 go build -o "${OPENDAWG_ROOT}/.opendawg/bin/mcp" ./cmd/mcptools
 ```
 
 Always ensure PATH includes the binary:
 ```bash
-export PATH="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.opendog/bin:$PATH"
+export PATH="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.opendawg/bin:$PATH"
 ```
 
 ## Discovery Workflow

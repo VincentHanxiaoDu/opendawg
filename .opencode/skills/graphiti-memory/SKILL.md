@@ -67,17 +67,17 @@ All sensitive values MUST be injected via `$(config-cli get <key>)`. Never pass 
 For advanced usage or direct tool access, use `mcp call` via the mcp-cli skill:
 
 ```bash
-mcp call search_memory_facts --params '{"query":"auth","group_ids":["opendog"]}' http://localhost:8000/mcp
-mcp call add_memory --params '{"name":"ep1","episode_body":"fact","group_id":"opendog"}' http://localhost:8000/mcp
+mcp call search_memory_facts --params '{"query":"auth","group_ids":["opendawg"]}' http://localhost:8000/mcp
+mcp call add_memory --params '{"name":"ep1","episode_body":"fact","group_id":"opendawg"}' http://localhost:8000/mcp
 mcp call delete_episode --params '{"uuid":"<uuid>"}' http://localhost:8000/mcp
 mcp call delete_entity_edge --params '{"uuid":"<uuid>"}' http://localhost:8000/mcp
-mcp call clear_graph --params '{"group_ids":["opendog"]}' http://localhost:8000/mcp
+mcp call clear_graph --params '{"group_ids":["opendawg"]}' http://localhost:8000/mcp
 ```
 
 ## Prerequisites
 
 1. **config-cli** installed and authenticated (`bash skills/config-cli/scripts/install.sh`)
-2. **mcp** CLI installed (`.opendog/bin/mcp`)
+2. **mcp** CLI installed (`.opendawg/bin/mcp`)
 3. **jq** for JSON processing
 4. **Docker** with Compose V2
 5. **Azure OpenAI credentials** stored: `config-cli set AZURE_OPENAI_API_KEY <key>` and `config-cli set AZURE_OPENAI_ENDPOINT <url>`
@@ -161,7 +161,7 @@ graphiti-cli clear --confirm
 - **Neo4j 5.26.2**: Graph database for storing entities and relationships
 - **Graphiti MCP Server**: LLM-powered knowledge extraction and semantic search
 - **MCP Transport**: HTTP at `http://localhost:8000/mcp/`
-- **Group ID**: Configurable via `GRAPHITI_GROUP_ID` env var (default: `opendog`)
+- **Group ID**: Configurable via `GRAPHITI_GROUP_ID` env var (default: `opendawg`)
 
 ## Storage
 

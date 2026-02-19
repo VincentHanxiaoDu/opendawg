@@ -5,8 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-export PATH="${OPENDOG_ROOT}/.opendog/bin:${PATH}"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+export PATH="${OPENDAWG_ROOT}/.opendawg/bin:${PATH}"
 
 # --- Defaults ---
 CRONICLE_URL="${CRONICLE_URL:-http://localhost:3012}"
@@ -57,8 +57,8 @@ inject_secrets() {
 
 # --- Docker Compose file detection ---
 detect_compose_file() {
-  if [[ -f "${OPENDOG_ROOT}/docker-compose.yml" ]]; then
-    echo "${OPENDOG_ROOT}/docker-compose.yml"
+  if [[ -f "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
+    echo "${OPENDAWG_ROOT}/docker-compose.yml"
   else
     echo "${SKILL_DIR}/docker/docker-compose.yml"
   fi
@@ -91,7 +91,7 @@ cmd_start() {
 
   export CRONICLE_API_KEY CRONICLE_PORT CRONICLE_URL
 
-  if [[ "$compose_file" == "${OPENDOG_ROOT}/docker-compose.yml" ]]; then
+  if [[ "$compose_file" == "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
     docker compose -f "$compose_file" --profile cron up -d
   else
     docker compose -f "$compose_file" up -d
@@ -122,7 +122,7 @@ cmd_stop() {
   compose_file=$(detect_compose_file)
 
   echo "[cron-cli] Stopping Cronicle..."
-  if [[ "$compose_file" == "${OPENDOG_ROOT}/docker-compose.yml" ]]; then
+  if [[ "$compose_file" == "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
     docker compose -f "$compose_file" --profile cron down
   else
     docker compose -f "$compose_file" down
@@ -135,7 +135,7 @@ cmd_status() {
   compose_file=$(detect_compose_file)
 
   echo "=== Docker Services ==="
-  if [[ "$compose_file" == "${OPENDOG_ROOT}/docker-compose.yml" ]]; then
+  if [[ "$compose_file" == "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
     docker compose -f "$compose_file" --profile cron ps 2>/dev/null || echo "  (not running)"
   else
     docker compose -f "$compose_file" ps 2>/dev/null || echo "  (not running)"

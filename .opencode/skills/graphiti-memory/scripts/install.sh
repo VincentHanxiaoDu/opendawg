@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-BIN_DIR="${OPENDOG_ROOT}/.opendog/bin"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+BIN_DIR="${OPENDAWG_ROOT}/.opendawg/bin"
 
 echo "=== graphiti-memory installer ==="
 
@@ -29,7 +29,7 @@ fi
 if ! command -v "${BIN_DIR}/mcp" &>/dev/null && ! command -v mcp &>/dev/null; then
   echo "ERROR: 'mcp' CLI is required. Install it first:" >&2
   echo "  cd \"\${TMPDIR:-/tmp}\" && git clone --depth 1 https://github.com/f/mcptools.git" >&2
-  echo "  cd mcptools && CGO_ENABLED=0 go build -o \"\${OPENDOG_ROOT}/.opendog/bin/mcp\" ./cmd/mcptools" >&2
+  echo "  cd mcptools && CGO_ENABLED=0 go build -o \"\${OPENDAWG_ROOT}/.opendawg/bin/mcp\" ./cmd/mcptools" >&2
   errors=1
 fi
 
@@ -63,7 +63,7 @@ if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
   echo "WARNING: ${BIN_DIR} is not in your PATH."
   echo "Add this to your shell profile (~/.zshrc or ~/.bashrc):"
   echo ""
-  echo "  export PATH=\"\$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.opendog/bin:\$PATH\""
+  echo "  export PATH=\"\$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.opendawg/bin:\$PATH\""
   echo ""
 fi
 

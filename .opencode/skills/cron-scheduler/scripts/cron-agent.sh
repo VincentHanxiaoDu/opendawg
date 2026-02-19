@@ -5,15 +5,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-export PATH="${OPENDOG_ROOT}/.opendog/bin:${PATH}"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+export PATH="${OPENDAWG_ROOT}/.opendawg/bin:${PATH}"
 
 # --- Defaults (overridden by env or config-cli vault) ---
 CRONICLE_URL="${CRONICLE_URL:-http://localhost:3012}"
 CRONICLE_API_KEY="${CRONICLE_API_KEY:-}"
 
 # Runner whitelist — only these runners are allowed
-RUNNER_WHITELIST_FILE="${CRON_RUNNER_WHITELIST:-${OPENDOG_ROOT}/.opencode/skills/cron-scheduler/runners.conf}"
+RUNNER_WHITELIST_FILE="${CRON_RUNNER_WHITELIST:-${OPENDAWG_ROOT}/.opencode/skills/cron-scheduler/runners.conf}"
 DEFAULT_RUNNERS=("opencode" "/usr/local/bin/job_runner" "/usr/local/bin/opencode")
 
 usage() {

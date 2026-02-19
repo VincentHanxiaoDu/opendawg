@@ -10,8 +10,8 @@ Thumbs.db
 node_modules/
 dist/
 
-# OpenDog local state
-.opendog/
+# OpenDawg local state
+.opendawg/
 
 # Claude Code
 .claude/

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap and launch opencode in headless server mode.
-# Same environment setup as opendog-agent.sh, but runs `opencode serve`.
+# Same environment setup as opendawg-agent.sh, but runs `opencode serve`.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ REPO_URL=""
 REPO_BRANCH="main"
 CONFIG_CLI_ENDPOINT=""
 CONFIG_CLI_TOKEN=""
-GRAPHITI_GROUP_ID="opendog"
+GRAPHITI_GROUP_ID="opendawg"
 GRAPHITI_MODEL=""
 LOG_LEVEL="DEBUG"
 SERVER_PORT="4096"
@@ -37,7 +37,7 @@ Environment & Skills Options:
   --repo-branch <branch>        Branch to use (default: main)
   --config-cli-endpoint <url>   config-cli login endpoint URL
   --config-cli-token <token>    config-cli token (alternative to endpoint)
-  --graphiti-group-id <id>      Override graphiti group ID (default: opendog)
+  --graphiti-group-id <id>      Override graphiti group ID (default: opendawg)
   --graphiti-model <model>      Override graphiti model
   --env-file <path>             Load environment from .env file
   --log-level <level>           Log level for opencode (default: DEBUG)
@@ -134,7 +134,7 @@ fi
 install_skills() {
   local repo_url="$1"
   local branch="${2:-main}"
-  local cache_dir="${TMPDIR:-/tmp}/opendog-agent-repo"
+  local cache_dir="${TMPDIR:-/tmp}/opendawg-agent-repo"
 
   echo "[opencode-server] Syncing skills from repo (branch: $branch)..."
 
@@ -168,8 +168,8 @@ config_cli_requested() {
 }
 
 if ! config_cli_requested && ! command -v config-cli &>/dev/null; then
-  OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-  if [[ ! -d "${OPENDOG_ROOT}/.opendog/vault" ]]; then
+  OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  if [[ ! -d "${OPENDAWG_ROOT}/.opendawg/vault" ]]; then
     echo "[opencode-server] Skipping config-cli — not installed and no auth flags provided"
     SKIP_CONFIG_CLI=true
     SKIP_GRAPHITI=true
@@ -182,8 +182,8 @@ if [[ "$SKIP_CONFIG_CLI" = false ]]; then
     if [[ -f "$CONFIG_CLI_INSTALL" ]]; then
       echo "[opencode-server] Installing config-cli..."
       bash "$CONFIG_CLI_INSTALL"
-      OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-      export PATH="${OPENDOG_ROOT}/.opendog/bin:$PATH"
+      OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+      export PATH="${OPENDAWG_ROOT}/.opendawg/bin:$PATH"
     else
       SKIP_CONFIG_CLI=true
       SKIP_GRAPHITI=true

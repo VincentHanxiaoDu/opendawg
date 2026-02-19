@@ -6,10 +6,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MCP_ENDPOINT="http://localhost:8000/mcp"
-GROUP_ID="${GRAPHITI_GROUP_ID:-opendog}"
+GROUP_ID="${GRAPHITI_GROUP_ID:-opendawg}"
 
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-export PATH="${OPENDOG_ROOT}/.opendog/bin:${PATH}"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+export PATH="${OPENDAWG_ROOT}/.opendawg/bin:${PATH}"
 
 usage() {
   cat <<'EOF'
@@ -34,7 +34,7 @@ Flags for 'remember':
   --name <name>               Episode name (default: auto-generated)
 
 Environment:
-  GRAPHITI_GROUP_ID           Group ID for partitioning (default: opendog)
+  GRAPHITI_GROUP_ID           Group ID for partitioning (default: opendawg)
 EOF
 }
 

@@ -141,10 +141,10 @@ services:
       # can authenticate against a password-protected opencode server automatically.
       - OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-}
       - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
-      - MEDIA_TMP_LOCATION=${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram
+      - MEDIA_TMP_LOCATION=${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/telegram
     volumes:
       - channel_data:/data
-      - ${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram:${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram
+      - ${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/telegram:${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/telegram
     profiles:
       - telegram
     restart: on-failure
@@ -169,10 +169,10 @@ services:
       # HTTP Basic Auth credentials — forwarded from opencode server config.
       - OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-}
       - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
-      - MEDIA_TMP_LOCATION=${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord
+      - MEDIA_TMP_LOCATION=${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/discord
     volumes:
       - channel_discord_data:/data
-      - ${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord:${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord
+      - ${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/discord:${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/discord
     profiles:
       - discord
     restart: on-failure

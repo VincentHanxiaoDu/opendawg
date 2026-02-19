@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# One-time environment setup for opendog-agent.
+# One-time environment setup for opendawg-agent.
 # Run once per machine/project to: sync skills, configure auth, inject secrets, install/update opencode.
-# After setup completes, use opendog-agent.sh for all subsequent interactions.
+# After setup completes, use opendawg-agent.sh for all subsequent interactions.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,21 +12,21 @@ REPO_URL=""
 REPO_BRANCH="main"
 CONFIG_CLI_ENDPOINT=""
 CONFIG_CLI_TOKEN=""
-GRAPHITI_GROUP_ID="opendog"
+GRAPHITI_GROUP_ID="opendawg"
 GRAPHITI_MODEL=""
 
 show_help() {
   cat <<'EOF'
 Usage: setup.sh [options]
 
-One-time environment setup for opendog-agent. Run this before using opendog-agent.sh.
+One-time environment setup for opendawg-agent. Run this before using opendawg-agent.sh.
 
 Options:
   --repo <url>                  Git repo URL with .opencode/skills/ (required first run)
   --repo-branch <branch>        Branch to use (default: main)
   --config-cli-endpoint <url>   config-cli login endpoint URL
   --config-cli-token <token>    config-cli token (alternative to endpoint)
-  --graphiti-group-id <id>      Override graphiti group ID (default: opendog)
+  --graphiti-group-id <id>      Override graphiti group ID (default: opendawg)
   --graphiti-model <model>      Override graphiti model
   -h, --help                    Show this help
 EOF
@@ -47,7 +47,7 @@ done
 
 # --- Step 1: Install skills from repo ---
 if [[ -n "$REPO_URL" ]]; then
-  cache_dir="${TMPDIR:-/tmp}/opendog-agent-repo"
+  cache_dir="${TMPDIR:-/tmp}/opendawg-agent-repo"
   echo "[setup] Syncing skills from repo (branch: $REPO_BRANCH)..."
 
   if [[ -d "$cache_dir/.git" ]]; then
@@ -75,8 +75,8 @@ config_cli_requested() {
 }
 
 if ! config_cli_requested && ! command -v config-cli &>/dev/null; then
-  OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-  if [[ ! -d "${OPENDOG_ROOT}/.opendog/vault" ]]; then
+  OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  if [[ ! -d "${OPENDAWG_ROOT}/.opendawg/vault" ]]; then
     echo "[setup] Skipping config-cli — not installed and no auth flags provided"
     SKIP_CONFIG_CLI=true
   fi
@@ -87,8 +87,8 @@ if [[ "$SKIP_CONFIG_CLI" = false ]] && ! command -v config-cli &>/dev/null; then
   if [[ -f "$CONFIG_CLI_INSTALL" ]]; then
     echo "[setup] Installing config-cli..."
     bash "$CONFIG_CLI_INSTALL"
-    OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-    export PATH="${OPENDOG_ROOT}/.opendog/bin:$PATH"
+    OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+    export PATH="${OPENDAWG_ROOT}/.opendawg/bin:$PATH"
   else
     echo "[setup] Warning: config-cli install script not found at $CONFIG_CLI_INSTALL"
     SKIP_CONFIG_CLI=true
@@ -141,4 +141,4 @@ else
 fi
 
 echo "[setup] opencode $(opencode --version 2>/dev/null || echo '?') — ready"
-echo "[setup] Setup complete. Use opendog-agent.sh to run tasks."
+echo "[setup] Setup complete. Use opendawg-agent.sh to run tasks."
