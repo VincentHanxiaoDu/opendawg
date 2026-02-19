@@ -314,7 +314,7 @@ jobspec_to_event() {
   local name enabled schedule_type schedule_expr schedule_tz
   local runner target_tags timeout_sec retries
   name=$(echo "$jobspec" | jq -r '.name // empty')
-  enabled=$(echo "$jobspec" | jq -r '.enabled // true')
+  enabled=$(echo "$jobspec" | jq -r 'if .enabled == null then "true" else (.enabled | tostring) end')
   schedule_type=$(echo "$jobspec" | jq -r '.schedule.type // "cron"')
   schedule_expr=$(echo "$jobspec" | jq -r '.schedule.expr // empty')
   schedule_tz=$(echo "$jobspec" | jq -r '.schedule.timezone // "UTC"')

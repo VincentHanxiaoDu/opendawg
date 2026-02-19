@@ -221,7 +221,7 @@ cmd_clear() {
       -H "X-API-Key: ${CRONICLE_API_KEY}" \
       -H "Content-Type: application/json" \
       -d "{\"id\":\"${id}\"}" &>/dev/null || true
-    ((count++))
+    count=$((count + 1))
   done
 
   echo "Deleted ${count} jobs."
