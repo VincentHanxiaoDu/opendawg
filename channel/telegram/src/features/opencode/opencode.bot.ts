@@ -1627,15 +1627,14 @@ export class OpenCodeBot {
             await MessageUtils.scheduleMessageDeletion(ctx, confirmMessage.message_id, this.configService.getMessageDeleteTimeout());
             console.log(`✓ File saved: ${savePath} (${fileType}, ${buffer.length} bytes)`);
 
-            const caption = message.caption?.trim();
-            if (caption) {
-                const userId = ctx.from?.id;
-                if (!userId) return;
-                if (!this.opencodeService.hasActiveSession(userId)) {
-                    await ctx.reply("❌ No active OpenCode session. Use /opencode to start a session first.");
-                    return;
-                }
-                const promptText = `[Attached file: ${savePath}]\n\n${caption}`;
+            // Always forward uploaded files to the agent (with or without caption)
+            const userId = ctx.from?.id;
+            if (!userId) return;
+            if (this.opencodeService.hasActiveSession(userId)) {
+                const caption = message.caption?.trim();
+                const promptText = caption
+                    ? `[Attached file: ${savePath}]\n\n${caption}`
+                    : `[Attached file: ${savePath}]`;
                 await this.sendPromptToOpenCode(ctx, userId, promptText);
             }
         } catch (error) {

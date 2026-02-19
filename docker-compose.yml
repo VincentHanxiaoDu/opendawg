@@ -137,15 +137,43 @@ services:
       # Fallback: OPENCODE_SERVER_URL (single server, legacy)
       - OPENCODE_SERVER_URLS=${OPENCODE_SERVER_URLS:-}
       - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+      - MEDIA_TMP_LOCATION=${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram
     volumes:
       - channel_data:/data
+      - ${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram:${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram
     profiles:
       - telegram
+    restart: on-failure
+
+  # ============================================================
+  # Channel — Discord (opencode-discord, pure client)
+  #   Activated by: --channel=discord or --start-all
+  # ============================================================
+  channel-discord:
+    build:
+      context: .
+      dockerfile: Dockerfile.channel-discord
+    network_mode: "host"
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_APP_ID=${DISCORD_APP_ID:-}
+      - ALLOWED_USER_IDS=${DISCORD_ALLOWED_USER_IDS:-}
+      - ADMIN_USER_ID=${DISCORD_ADMIN_USER_ID:-}
+      - MESSAGE_DELETE_TIMEOUT=${DISCORD_MESSAGE_DELETE_TIMEOUT:-0}
+      - OPENCODE_SERVER_URLS=${OPENCODE_SERVER_URLS:-}
+      - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+      - MEDIA_TMP_LOCATION=${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord
+    volumes:
+      - channel_discord_data:/data
+      - ${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord:${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord
+    profiles:
+      - discord
     restart: on-failure
 
 volumes:
   neo4j_data:
   config_vault:
   channel_data:
+  channel_discord_data:
   cronicle_data:
   cronicle_logs:
