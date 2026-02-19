@@ -7,14 +7,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MCP_ENDPOINT="http://localhost:8000/mcp"
 HEALTH_ENDPOINT="http://localhost:8000/health"
-GROUP_ID="${GRAPHITI_GROUP_ID:-opendog}"
+GROUP_ID="${GRAPHITI_GROUP_ID:-opendawg}"
 
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-export PATH="${OPENDOG_ROOT}/.opendog/bin:${PATH}"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+export PATH="${OPENDAWG_ROOT}/.opendawg/bin:${PATH}"
 
 # Docker compose: prefer root docker-compose.yml (with profiles), fallback to skill-local one
-if [[ -f "${OPENDOG_ROOT}/docker-compose.yml" ]]; then
-  DOCKER_COMPOSE_FILE="${OPENDOG_ROOT}/docker-compose.yml"
+if [[ -f "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
+  DOCKER_COMPOSE_FILE="${OPENDAWG_ROOT}/docker-compose.yml"
   DOCKER_COMPOSE_PROFILE="--profile graphiti"
 else
   DOCKER_COMPOSE_FILE="${SCRIPT_DIR}/../docker/docker-compose.yml"
@@ -48,7 +48,7 @@ Flags for 'remember':
   --name <name>               Episode name (default: auto-generated)
 
 Environment:
-  GRAPHITI_GROUP_ID           Group ID for partitioning (default: opendog)
+  GRAPHITI_GROUP_ID           Group ID for partitioning (default: opendawg)
 EOF
 }
 

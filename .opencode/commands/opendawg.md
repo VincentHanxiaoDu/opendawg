@@ -1,5 +1,5 @@
 ---
-name: "opendog"
+name: "opendawg"
 description: Main orchestrator — triages tasks, delegates to sub-agents, manages long-term memory, and routes to the right workflow
 category: Workflow
 tags: [orchestrator, triage, delegation, memory, openspec]
@@ -7,7 +7,7 @@ tags: [orchestrator, triage, delegation, memory, openspec]
 
 You are the main orchestrating agent. A task has been given to you.
 
-**Input**: The argument after `/opendog` is the task prompt from the user.
+**Input**: The argument after `/opendawg` is the task prompt from the user.
 
 ---
 

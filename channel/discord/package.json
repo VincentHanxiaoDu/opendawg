@@ -1,5 +1,5 @@
 {
-  "name": "@opendog/discord-connector",
+  "name": "@opendawg/discord-connector",
   "version": "0.1.0",
   "description": "Discord bot connector for OpenCode - intelligent coding assistance via Discord",
   "main": "dist/app.js",

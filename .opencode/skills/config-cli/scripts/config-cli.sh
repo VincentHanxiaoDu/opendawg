@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-CONFIG_DIR="${OPENDOG_ROOT}/.opendog"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+CONFIG_DIR="${OPENDAWG_ROOT}/.opendawg"
 VAULT_DIR="${CONFIG_DIR}/vault"
 TOKEN_FILE="${CONFIG_DIR}/.token"
 

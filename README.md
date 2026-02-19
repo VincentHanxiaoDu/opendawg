@@ -1,6 +1,6 @@
-# OpenDog
+# OpenDawg
 
-OpenDog is an infrastructure layer for running [OpenCode](https://opencode.ai) as a headless server with Docker-managed services and messaging channels.
+OpenDawg is an infrastructure layer for running [OpenCode](https://opencode.ai) as a headless server with Docker-managed services and messaging channels.
 
 ## Architecture
 

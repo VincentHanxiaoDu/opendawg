@@ -1,33 +1,33 @@
 ---
-name: opendog-agent
-description: Spawn and manage fully-configured opencode CLI sessions. Use when the user wants to launch opencode on a local or remote machine, bootstrap environments with skills from a git repo, set up config-cli auth and vault secrets, or orchestrate opencode agents. Also triggers when the user mentions opendog-agent, spawning agents, remote opencode, or multi-machine orchestration.
+name: opendawg-agent
+description: Spawn and manage fully-configured opencode CLI sessions. Use when the user wants to launch opencode on a local or remote machine, bootstrap environments with skills from a git repo, set up config-cli auth and vault secrets, or orchestrate opencode agents. Also triggers when the user mentions opendawg-agent, spawning agents, remote opencode, or multi-machine orchestration.
 ---
 
-# opendog-agent
+# opendawg-agent
 
 Two scripts, two concerns:
 
 | Script | Purpose | When to run |
 |--------|---------|-------------|
 | **`setup.sh`** | Environment prep — sync skills, config-cli auth, vault secrets, install/update opencode | Once per machine/project, or when environment changes |
-| **`opendog-agent.sh`** | Launch opencode for a task — lightweight, no network calls, no updates | Every task invocation |
+| **`opendawg-agent.sh`** | Launch opencode for a task — lightweight, no network calls, no updates | Every task invocation |
 
-**Always run `setup.sh` first**, then use `opendog-agent.sh` for all interactions.
+**Always run `setup.sh` first**, then use `opendawg-agent.sh` for all interactions.
 
 ## Execution Method Priority
 
 | Priority | Method | When to use |
 |----------|--------|-------------|
-| **1. SSH direct** | `ssh host "cd /project && bash .../opendog-agent.sh ..."` | SSH available, simple/single-turn tasks, good network |
-| **2. tmux-tty** | `tmux-wrapper.sh` + `opendog-agent.sh` | No reliable SSH, need TTY, multi-turn interaction, or poor network (tmux survives disconnects) |
+| **1. SSH direct** | `ssh host "cd /project && bash .../opendawg-agent.sh ..."` | SSH available, simple/single-turn tasks, good network |
+| **2. tmux-tty** | `tmux-wrapper.sh` + `opendawg-agent.sh` | No reliable SSH, need TTY, multi-turn interaction, or poor network (tmux survives disconnects) |
 
 **SSH is preferred** for straightforward invocations — no tmux overhead, direct stdout capture. Fall back to tmux for persistent sessions, TTY interaction, or network resilience.
 
 ## CLI vs TUI Mode
 
-`opendog-agent.sh` defaults to **CLI mode** (`opencode run`):
+`opendawg-agent.sh` defaults to **CLI mode** (`opencode run`):
 
-- **New session** (no `-s`): uses `--format json` automatically to capture the session ID, prints `[opendog-agent] session=<id>`
+- **New session** (no `-s`): uses `--format json` automatically to capture the session ID, prints `[opendawg-agent] session=<id>`
 - **Continue session** (with `-s <id>`): runs `opencode run` normally — no `--format json`
 
 Use `--tui` only when the user explicitly requests interactive exploration.
@@ -38,14 +38,14 @@ Use `--tui` only when the user explicitly requests interactive exploration.
 | **Continue session** | `opencode run -s <id>` → normal output |
 | **TUI** | `opencode --tui` → interactive terminal UI |
 
-## Best Practice: Use `/opendog` Slash Command
+## Best Practice: Use `/opendawg` Slash Command
 
-**Prefer `/opendog [task]` over raw prompts** whenever the project has opendog skills installed (`.opencode/commands/opendog.md` exists). The `/opendog` command provides structured triage, tool preference enforcement, memory management, and sub-agent delegation.
+**Prefer `/opendawg [task]` over raw prompts** whenever the project has opendawg skills installed (`.opencode/commands/opendawg.md` exists). The `/opendawg` command provides structured triage, tool preference enforcement, memory management, and sub-agent delegation.
 
 | Prompt style | When to use |
 |--------------|-------------|
-| `/opendog implement the login feature` | **Default** — project has opendog skills |
-| `"implement the login feature"` | Fallback — project lacks opendog skills, or task needs no orchestration |
+| `/opendawg implement the login feature` | **Default** — project has opendawg skills |
+| `"implement the login feature"` | Fallback — project lacks opendawg skills, or task needs no orchestration |
 
 ## Best Practice: Session Tracking with `-s`
 
@@ -54,14 +54,14 @@ Use `--tui` only when the user explicitly requests interactive exploration.
 The session ID is captured on the **first run only**:
 
 ```
-1st run:  opendog-agent.sh "/opendog build the auth module"
+1st run:  opendawg-agent.sh "/opendawg build the auth module"
           → JSON output (--format json, automatic)
-          → [opendog-agent] session=ses_abc123
+          → [opendawg-agent] session=ses_abc123
 
-2nd run:  opendog-agent.sh -s ses_abc123 "/opendog add rate limiting"
+2nd run:  opendawg-agent.sh -s ses_abc123 "/opendawg add rate limiting"
           → normal output
 
-3rd run:  opendog-agent.sh -s ses_abc123 "/opendog write tests"
+3rd run:  opendawg-agent.sh -s ses_abc123 "/opendawg write tests"
           → normal output
 ```
 
@@ -76,21 +76,21 @@ grep -o 'session=ses_[^ ]*' <<< "$CAPTURED_OUTPUT" | tail -1 | cut -d= -f2
 
 ```bash
 bash <skill-path>/scripts/setup.sh \
-  --repo https://github.com/VincentHanxiaoDu/opendog \
+  --repo https://github.com/VincentHanxiaoDu/opendawg \
   --config-cli-endpoint "https://..."
 ```
 
 ### 2. First task (new session)
 
 ```bash
-bash <skill-path>/scripts/opendog-agent.sh "/opendog implement the login feature"
-# → [opendog-agent] session=ses_abc123
+bash <skill-path>/scripts/opendawg-agent.sh "/opendawg implement the login feature"
+# → [opendawg-agent] session=ses_abc123
 ```
 
 ### 3. Continue the session
 
 ```bash
-bash <skill-path>/scripts/opendog-agent.sh -s ses_abc123 "/opendog add unit tests"
+bash <skill-path>/scripts/opendawg-agent.sh -s ses_abc123 "/opendawg add unit tests"
 ```
 
 ### Via tmux (when TTY needed)
@@ -101,11 +101,11 @@ bash <skill-path>/scripts/opendog-agent.sh -s ses_abc123 "/opendog add unit test
 
 # Setup (once)
 <tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/setup.sh \
-  --repo https://github.com/VincentHanxiaoDu/opendog' Enter
+  --repo https://github.com/VincentHanxiaoDu/opendawg' Enter
 
 # First task
-<tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opendog-agent.sh \
-  "/opendog implement the login feature"' Enter
+<tmux-skill-path>/tmux-wrapper.sh send oc 'bash <skill-path>/scripts/opendawg-agent.sh \
+  "/opendawg implement the login feature"' Enter
 
 # Capture session ID
 sleep 30
@@ -113,8 +113,8 @@ OUTPUT=$(<tmux-skill-path>/tmux-wrapper.sh capture oc)
 SID=$(echo "$OUTPUT" | grep -o 'session=ses_[^ ]*' | tail -1 | cut -d= -f2)
 
 # Continue
-<tmux-skill-path>/tmux-wrapper.sh send oc "bash <skill-path>/scripts/opendog-agent.sh \
-  -s $SID \"/opendog add unit tests\"" Enter
+<tmux-skill-path>/tmux-wrapper.sh send oc "bash <skill-path>/scripts/opendawg-agent.sh \
+  -s $SID \"/opendawg add unit tests\"" Enter
 
 # Cleanup
 <tmux-skill-path>/tmux-wrapper.sh stop oc
@@ -125,14 +125,14 @@ SID=$(echo "$OUTPUT" | grep -o 'session=ses_[^ ]*' | tail -1 | cut -d= -f2)
 ### Launch
 
 ```bash
-bash <skill-path>/scripts/setup.sh --repo https://github.com/VincentHanxiaoDu/opendog
-bash <skill-path>/scripts/opendog-agent.sh --tui
+bash <skill-path>/scripts/setup.sh --repo https://github.com/VincentHanxiaoDu/opendawg
+bash <skill-path>/scripts/opendawg-agent.sh --tui
 ```
 
 ### Interact
 
 ```bash
-<tmux-skill-path>/tmux-wrapper.sh send oc '/opendog implement the login feature' Enter
+<tmux-skill-path>/tmux-wrapper.sh send oc '/opendawg implement the login feature' Enter
 sleep 0.5
 <tmux-skill-path>/tmux-wrapper.sh send oc Enter
 ```
@@ -175,13 +175,13 @@ bash <skill-path>/scripts/setup.sh [options]
 | `--repo-branch` | `<branch>` | Branch to use (default: main) |
 | `--config-cli-endpoint` | `<url>` | config-cli login endpoint |
 | `--config-cli-token` | `<token>` | config-cli token (alternative to endpoint) |
-| `--graphiti-group-id` | `<id>` | Override GRAPHITI_GROUP_ID (default: opendog) |
+| `--graphiti-group-id` | `<id>` | Override GRAPHITI_GROUP_ID (default: opendawg) |
 | `--graphiti-model` | `<model>` | Override MODEL_NAME for graphiti |
 
-### opendog-agent.sh
+### opendawg-agent.sh
 
 ```bash
-bash <skill-path>/scripts/opendog-agent.sh [options] [prompt...]
+bash <skill-path>/scripts/opendawg-agent.sh [options] [prompt...]
 ```
 
 | Flag | Arg | Purpose |
@@ -203,7 +203,7 @@ All unrecognized flags pass through to opencode.
 | `AZURE_OPENAI_ENDPOINT` | config-cli vault | Azure OpenAI endpoint |
 | `AZURE_OPENAI_DEPLOYMENT` | vault or `--graphiti-model` | LLM deployment name |
 | `NEO4J_PASSWORD` | config-cli vault | Optional, for Neo4j |
-| `GRAPHITI_GROUP_ID` | `--graphiti-group-id` or default | Default: opendog |
+| `GRAPHITI_GROUP_ID` | `--graphiti-group-id` or default | Default: opendawg |
 
 ## Prerequisites
 
@@ -214,7 +214,7 @@ All unrecognized flags pass through to opencode.
 
 ## Pitfalls
 
-- **Run `setup.sh` before `opendog-agent.sh`** — the agent script assumes opencode is installed and env is ready
+- **Run `setup.sh` before `opendawg-agent.sh`** — the agent script assumes opencode is installed and env is ready
 - **Always use `-s <id>`, never `-c` for automation** — `-c` picks "last session" globally, breaks with parallel agents
 - **Prefer CLI mode for automation** — structured output, no TUI artifacts
 - **Always `sleep` after `send`** before `capture` — let commands initialize

@@ -5,7 +5,7 @@ description: Secure key-value vault for managing sensitive credentials (API keys
 
 # config-cli: Secure Credential Vault
 
-Manage sensitive values (API keys, passwords, tokens) encrypted at rest. Values are stored in `.opendog/vault/` (project root) using AES-256-CBC encryption with a master token as the passphrase. Project root is detected via `git rev-parse --show-toplevel` or overridden with the `OPENDOG_ROOT` env var.
+Manage sensitive values (API keys, passwords, tokens) encrypted at rest. Values are stored in `.opendawg/vault/` (project root) using AES-256-CBC encryption with a master token as the passphrase. Project root is detected via `git rev-parse --show-toplevel` or overridden with the `OPENDAWG_ROOT` env var.
 
 ## Critical Rules
 
@@ -80,8 +80,8 @@ config-cli delete OLD_KEY
 
 ## Storage Details
 
-- **Token**: `.opendog/.token` (chmod 600)
-- **Vault**: `.opendog/vault/<key>.enc` (AES-256-CBC, chmod 600)
-- **Config dir**: `.opendog/` in project root (chmod 700)
-- **Binaries**: `.opendog/bin/` — symlinks to CLI scripts
-- **Project root**: Detected via `git rev-parse --show-toplevel`, override with `OPENDOG_ROOT` env var
+- **Token**: `.opendawg/.token` (chmod 600)
+- **Vault**: `.opendawg/vault/<key>.enc` (AES-256-CBC, chmod 600)
+- **Config dir**: `.opendawg/` in project root (chmod 700)
+- **Binaries**: `.opendawg/bin/` — symlinks to CLI scripts
+- **Project root**: Detected via `git rev-parse --show-toplevel`, override with `OPENDAWG_ROOT` env var

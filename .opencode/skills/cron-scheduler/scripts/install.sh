@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPENDOG_ROOT="${OPENDOG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-BIN_DIR="${OPENDOG_ROOT}/.opendog/bin"
+OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+BIN_DIR="${OPENDAWG_ROOT}/.opendawg/bin"
 
 echo "=== cron-scheduler installer ==="
 
@@ -69,7 +69,7 @@ if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
   echo "WARNING: ${BIN_DIR} is not in your PATH."
   echo "Add this to your shell profile (~/.zshrc or ~/.bashrc):"
   echo ""
-  echo "  export PATH=\"\$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.opendog/bin:\$PATH\""
+  echo "  export PATH=\"\$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.opendawg/bin:\$PATH\""
   echo ""
 fi
 
