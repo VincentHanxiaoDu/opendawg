@@ -74,38 +74,39 @@ export class ConfigService {
     private parseDefaultServers(): DefaultServer[] {
         const urlsEnv = process.env.OPENCODE_SERVER_URLS || '';
         if (urlsEnv.trim()) {
-            // Format: "url1|name1,url2|name2" or just "url1,url2"
+            // Format: "url1|name1|username1|password1,url2|name2" or just "url1,url2"
             return urlsEnv
                 .split(',')
                 .map(entry => entry.trim())
                 .filter(entry => entry.length > 0)
                 .map(entry => {
-                    const pipeIdx = entry.indexOf('|');
-                    if (pipeIdx > 0) {
-                        return { url: entry.substring(0, pipeIdx).trim(), name: entry.substring(pipeIdx + 1).trim() };
-                    }
-                    try {
-                        const parsed = new URL(entry);
-                        return { url: entry, name: parsed.host };
-                    } catch {
-                        return { url: entry, name: entry };
-                    }
+                    const parts = entry.split('|');
+                    const url = parts[0].trim();
+                    const name = parts[1]?.trim() || (() => {
+                        try { return new URL(url).host; } catch { return url; }
+                    })();
+                    const username = parts[2]?.trim() || undefined;
+                    const password = parts[3]?.trim() || undefined;
+                    return { url, name, username, password };
                 });
         }
 
         // Fallback: OPENCODE_SERVER_URL (legacy single-server variable)
+        // Also read OPENCODE_SERVER_USERNAME / OPENCODE_SERVER_PASSWORD for auth
         const singleUrl = process.env.OPENCODE_SERVER_URL || '';
+        const envUsername = process.env.OPENCODE_SERVER_USERNAME?.trim() || undefined;
+        const envPassword = process.env.OPENCODE_SERVER_PASSWORD?.trim() || undefined;
         if (singleUrl.trim()) {
             try {
                 const parsed = new URL(singleUrl.trim());
-                return [{ url: singleUrl.trim(), name: parsed.host }];
+                return [{ url: singleUrl.trim(), name: parsed.host, username: envUsername, password: envPassword }];
             } catch {
-                return [{ url: singleUrl.trim(), name: 'Default' }];
+                return [{ url: singleUrl.trim(), name: 'Default', username: envUsername, password: envPassword }];
             }
         }
 
-        // Final fallback
-        return [{ url: 'http://localhost:4096', name: 'Local' }];
+        // Final fallback — still apply env credentials if set
+        return [{ url: 'http://localhost:4096', name: 'Local', username: envUsername, password: envPassword }];
     }
 
     // Telegram Configuration Getters

@@ -132,11 +132,15 @@ services:
       - ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
       - ADMIN_USER_ID=${ADMIN_USER_ID:-}
       - MESSAGE_DELETE_TIMEOUT=${TELEGRAM_MESSAGE_DELETE_TIMEOUT:-0}
-      # OPENCODE_SERVER_URLS: comma-separated list of servers, format: url|name,url2|name2
+      # OPENCODE_SERVER_URLS: comma-separated list of servers, format: url|name|username|password
       # With host networking, localhost reaches the host machine directly (Linux).
       # Fallback: OPENCODE_SERVER_URL (single server, legacy)
       - OPENCODE_SERVER_URLS=${OPENCODE_SERVER_URLS:-}
       - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+      # HTTP Basic Auth credentials — forwarded from opencode server config so the bot
+      # can authenticate against a password-protected opencode server automatically.
+      - OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-}
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
       - MEDIA_TMP_LOCATION=${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/telegram
     volumes:
       - channel_data:/data
@@ -162,6 +166,9 @@ services:
       - MESSAGE_DELETE_TIMEOUT=${DISCORD_MESSAGE_DELETE_TIMEOUT:-0}
       - OPENCODE_SERVER_URLS=${OPENCODE_SERVER_URLS:-}
       - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+      # HTTP Basic Auth credentials — forwarded from opencode server config.
+      - OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-}
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
       - MEDIA_TMP_LOCATION=${OPENDOG_MEDIA_DIR:-${HOME}/opendog/media}/discord
     volumes:
       - channel_discord_data:/data

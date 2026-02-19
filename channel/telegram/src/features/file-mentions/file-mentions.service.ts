@@ -10,9 +10,13 @@ export class FileMentionService {
     private parser: FileMentionParser;
     private baseUrl: string;
     private config: FileMentionConfig;
+    private username?: string;
+    private password?: string;
     
-    constructor(baseUrl?: string, config?: Partial<FileMentionConfig>) {
+    constructor(baseUrl?: string, config?: Partial<FileMentionConfig>, username?: string, password?: string) {
         this.baseUrl = baseUrl || process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
+        this.username = username;
+        this.password = password;
         this.parser = new FileMentionParser();
         this.config = {
             enabled: config?.enabled ?? true,
@@ -22,6 +26,14 @@ export class FileMentionService {
             cacheEnabled: config?.cacheEnabled ?? false,
             cacheTTL: config?.cacheTTL ?? 300000, // 5 minutes
         };
+    }
+
+    private createClient() {
+        if (this.username && this.password) {
+            const credentials = Buffer.from(`${this.username}:${this.password}`).toString("base64");
+            return createOpencodeClient({ baseUrl: this.baseUrl, headers: { Authorization: `Basic ${credentials}` } });
+        }
+        return createOpencodeClient({ baseUrl: this.baseUrl });
     }
     
     /**
@@ -35,7 +47,7 @@ export class FileMentionService {
      * Find files matching a query using OpenCode find.files API
      */
     async findFiles(query: string, directory?: string): Promise<FileMatch[]> {
-        const client = createOpencodeClient({ baseUrl: this.baseUrl });
+        const client = this.createClient();
         
         try {
             const result = await client.find.files({
@@ -82,7 +94,7 @@ export class FileMentionService {
      * Read file content using OpenCode file.read API
      */
     async readFile(path: string): Promise<string | null> {
-        const client = createOpencodeClient({ baseUrl: this.baseUrl });
+        const client = this.createClient();
         
         try {
             const result = await client.file.read({
