@@ -19,6 +19,10 @@ export interface UserSession {
     serverStatus: "idle" | "busy" | "error";
     /** Last error message from a session.error event */
     lastError?: string;
+    /** Base URL of the server this session is connected to */
+    serverUrl?: string;
+    /** Pre-computed Authorization header value (e.g. "Basic base64...") for this server */
+    authHeader?: string;
 }
 
 export interface UserState {

@@ -11,11 +11,15 @@ export interface ServerRecord {
     name: string;
     isActive: boolean;
     createdAt: number;
+    username?: string;
+    password?: string;
 }
 
 export interface DefaultServer {
     url: string;
     name: string;
+    username?: string;
+    password?: string;
 }
 
 /**
@@ -68,6 +72,9 @@ export class ServerRegistry {
             );
             CREATE INDEX IF NOT EXISTS idx_servers_user ON servers(user_id);
         `);
+        // Migrate: add credential columns if they don't exist (safe for existing DBs)
+        try { this.db.exec("ALTER TABLE servers ADD COLUMN username TEXT"); } catch {}
+        try { this.db.exec("ALTER TABLE servers ADD COLUMN password TEXT"); } catch {}
     }
 
     private ensureUserDefaults(userId: string): void {
@@ -79,7 +86,7 @@ export class ServerRegistry {
             : [{ url: "http://localhost:4096", name: "Local" }];
 
         servers.forEach((s, i) => {
-            this.add(userId, s.url, s.name, i === 0);
+            this.add(userId, s.url, s.name, i === 0, s.username, s.password);
         });
     }
 
@@ -89,7 +96,7 @@ export class ServerRegistry {
         }
         if (!this.db) return [];
         const rows = this.db.prepare(
-            "SELECT id, user_id, url, name, is_active, created_at FROM servers WHERE user_id = ? ORDER BY created_at ASC"
+            "SELECT id, user_id, url, name, is_active, created_at, username, password FROM servers WHERE user_id = ? ORDER BY created_at ASC"
         ).all(userId) as any[];
         return rows.map(r => ({
             id: r.id,
@@ -98,6 +105,8 @@ export class ServerRegistry {
             name: r.name,
             isActive: r.is_active === 1,
             createdAt: r.created_at,
+            username: r.username || undefined,
+            password: r.password || undefined,
         }));
     }
 
@@ -123,7 +132,7 @@ export class ServerRegistry {
         return null;
     }
 
-    add(userId: string, url: string, name?: string, makeActive = false): ServerRecord {
+    add(userId: string, url: string, name?: string, makeActive = false, username?: string, password?: string): ServerRecord {
         const { nanoid } = _require("nanoid") as typeof import("nanoid");
         const id = nanoid(8);
         const resolvedName = name || new URL(url).host;
@@ -136,6 +145,8 @@ export class ServerRegistry {
             name: resolvedName,
             isActive: makeActive,
             createdAt: now,
+            username: username || undefined,
+            password: password || undefined,
         };
 
         if (this.isMemoryMode) {
@@ -151,8 +162,8 @@ export class ServerRegistry {
             this.db.prepare("UPDATE servers SET is_active = 0 WHERE user_id = ?").run(userId);
         }
         this.db.prepare(
-            "INSERT INTO servers (id, user_id, url, name, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-        ).run(id, userId, url, resolvedName, makeActive ? 1 : 0, now);
+            "INSERT INTO servers (id, user_id, url, name, is_active, created_at, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(id, userId, url, resolvedName, makeActive ? 1 : 0, now, username || null, password || null);
         return record;
     }
 

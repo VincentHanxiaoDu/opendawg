@@ -574,13 +574,14 @@ export class OpenCodeBot {
 
         pageItems.forEach((s, idx) => {
             const flag = s.isActive ? "●" : "·";
+            const authBadge = s.username ? " 🔐" : "";
             const lineNum = safePage * PAGE_SIZE + idx + 1;
-            lines.push(`${lineNum}. ${flag} <code>${s.id}</code>  <b>${escapeHtml(s.name)}</b>\n   ${escapeHtml(s.url)}`);
+            lines.push(`${lineNum}. ${flag} <code>${s.id}</code>  <b>${escapeHtml(s.name)}</b>${authBadge}\n   ${escapeHtml(s.url)}`);
             const btnLabel = (s.isActive ? "● " : "↩ ") + s.name.substring(0, 20);
             useButtons.push({ text: btnLabel, callback_data: `su:${s.id}` });
         });
 
-        const text = `🖥️ <b>Servers (${servers.length})</b>\n\n${lines.join("\n\n")}\n\n● active  /server add &lt;url&gt; [name] to add`;
+        const text = `🖥️ <b>Servers (${servers.length})</b>\n\n${lines.join("\n\n")}\n\n● active  🔐 auth configured\n/server add &lt;url&gt; [name] [username] [password] to add`;
 
         const btnRows: Array<Array<{ text: string; callback_data: string }>> = [];
         for (let i = 0; i < useButtons.length; i += 2) {
@@ -717,7 +718,7 @@ export class OpenCodeBot {
             if (!subCmd) {
                 const m = await ctx.reply(
                     "🖥️ <b>Server commands:</b>\n" +
-                    "/server add &lt;url&gt; [name] — add server\n" +
+                    "/server add &lt;url&gt; [name] [username] [password] — add server\n" +
                     "/server remove &lt;id&gt; — remove server\n" +
                     "/server use &lt;id&gt; — switch active server\n" +
                     "/servers — list all servers",
@@ -741,14 +742,16 @@ export class OpenCodeBot {
 
     private async handleServerAdd(ctx: Context, userId: number, args: string): Promise<void> {
         if (!args) {
-            await ctx.reply("❌ Usage: /server add &lt;url&gt; [name]", { parse_mode: "HTML" });
+            await ctx.reply("❌ Usage: /server add &lt;url&gt; [name] [username] [password]", { parse_mode: "HTML" });
             return;
         }
 
-        // Parse "url name with spaces" or just "url"
-        const spaceIdx = args.indexOf(" ");
-        const url = spaceIdx > 0 ? args.substring(0, spaceIdx).trim() : args.trim();
-        const name = spaceIdx > 0 ? args.substring(spaceIdx + 1).trim() : undefined;
+        // Parse positional tokens: url [name] [username] [password]
+        const tokens = args.trim().split(/\s+/);
+        const url = tokens[0];
+        const name = tokens[1] || undefined;
+        const username = tokens[2] || undefined;
+        const password = tokens[3] || undefined;
 
         // Validate URL
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -767,11 +770,12 @@ export class OpenCodeBot {
             return;
         }
 
-        const record = this.serverRegistry.add(userId, url, name);
-        const m = await ctx.reply(
-            `✅ Server added: <b>${escapeHtml(record.name)}</b>\nURL: ${escapeHtml(record.url)}\nID: <code>${record.id}</code>`,
-            { parse_mode: "HTML" }
-        );
+        const record = this.serverRegistry.add(userId, url, name, false, username, password);
+        let replyText = `✅ Server added: <b>${escapeHtml(record.name)}</b>\nURL: ${escapeHtml(record.url)}\nID: <code>${record.id}</code>`;
+        if (record.username) {
+            replyText += `\n🔐 Auth: ${escapeHtml(record.username)} / ***`;
+        }
+        const m = await ctx.reply(replyText, { parse_mode: "HTML" });
         await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
     }
 
@@ -992,8 +996,7 @@ export class OpenCodeBot {
             if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
 
             const text = (ctx.message?.text || "").replace("/model", "").trim();
-            const baseUrl = this.opencodeService.getServerUrl(userId);
-            const client = createOpencodeClient({ baseUrl });
+            const client = this.opencodeService.createClientForUser(userId);
 
             // If arg provided directly (e.g. /model anthropic/claude-opus-4-5) → set immediately
             if (text && text.includes("/")) {
@@ -1060,8 +1063,7 @@ export class OpenCodeBot {
             const userId = ctx.from?.id;
             if (!userId) return;
 
-            const baseUrl = this.opencodeService.getServerUrl(userId);
-            const client = createOpencodeClient({ baseUrl });
+            const client = this.opencodeService.createClientForUser(userId);
 
             const providerResp = await client.provider.list();
             const provData = (providerResp as any)?.data ?? providerResp;
@@ -1130,8 +1132,7 @@ export class OpenCodeBot {
 
     /** Shared helper: call config.update to set the model */
     private async setModel(ctx: Context, userId: number, providerModel: string): Promise<void> {
-        const baseUrl = this.opencodeService.getServerUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.opencodeService.createClientForUser(userId);
         try {
             await (client.config as any).update({ model: providerModel });
             const text = `✅ Model set to: <code>${escapeHtml(providerModel)}</code>`;
@@ -1202,9 +1203,10 @@ export class OpenCodeBot {
                     await this.sendCommandToOpenCode(ctx, userId, commandName, commandArgs, promptText);
                 }
             } else {
-                const mentions = this.fileMentionService.parseMentions(promptText);
-                if (mentions.length > 0 && this.fileMentionService.isEnabled()) {
-                    await this.handlePromptWithMentions(ctx, userId, promptText, mentions);
+                const fmService = this.getFileMentionService(userId);
+                const mentions = fmService.parseMentions(promptText);
+                if (mentions.length > 0 && fmService.isEnabled()) {
+                    await this.handlePromptWithMentions(ctx, userId, promptText, mentions, fmService);
                 } else {
                     await this.sendPromptToOpenCode(ctx, userId, promptText);
                 }
@@ -1214,15 +1216,26 @@ export class OpenCodeBot {
         }
     }
 
-    private async handlePromptWithMentions(ctx: Context, userId: number, promptText: string, mentions: any[]): Promise<void> {
+    /** Return a FileMentionService configured with the user's active server credentials. */
+    private getFileMentionService(userId: number): FileMentionService {
+        const server = this.serverRegistry.getActive(userId);
+        if (server?.username && server?.password) {
+            return new FileMentionService(server.url, undefined, server.username, server.password);
+        }
+        // Fall back to shared instance (uses env URL / no auth)
+        return this.fileMentionService;
+    }
+
+    private async handlePromptWithMentions(ctx: Context, userId: number, promptText: string, mentions: any[], fmService?: FileMentionService): Promise<void> {
         try {
+            const svc = fmService ?? this.getFileMentionService(userId);
             const searchMessage = await this.fileMentionUI.showSearching(ctx, mentions.length);
-            const matches = await this.fileMentionService.searchMentions(mentions);
+            const matches = await svc.searchMentions(mentions);
             await ctx.api.deleteMessage(searchMessage.chat.id, searchMessage.message_id).catch(() => { });
             const selectedFiles = await this.fileMentionUI.confirmAllMatches(ctx, matches);
             if (!selectedFiles) { await ctx.reply("❌ File selection cancelled"); return; }
-            const resolved = await this.fileMentionService.resolveMentions(mentions, selectedFiles, true);
-            const fileContext = this.fileMentionService.formatForPrompt(resolved);
+            const resolved = await svc.resolveMentions(mentions, selectedFiles, true);
+            const fileContext = svc.formatForPrompt(resolved);
             await this.sendPromptToOpenCode(ctx, userId, promptText, fileContext);
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("process file mentions", error));
@@ -1339,8 +1352,10 @@ export class OpenCodeBot {
             }
 
             const { permissionID, reply } = cbData;
-            const baseUrl = process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
-            const client = createOpencodeClient({ baseUrl });
+            const userId = ctx.from?.id;
+            const client = userId
+                ? this.opencodeService.createClientForUser(userId)
+                : createOpencodeClient({ baseUrl: process.env.OPENCODE_SERVER_URL || "http://localhost:4096" });
 
             await client.permission.reply({
                 requestID: permissionID,

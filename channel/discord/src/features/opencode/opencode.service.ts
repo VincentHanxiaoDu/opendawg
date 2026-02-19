@@ -48,6 +48,17 @@ export class OpenCodeService {
         return process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
     }
 
+    /** Create an opencode client for the given user, injecting Basic Auth if credentials are configured. */
+    createClientForUser(userId: string): ReturnType<typeof createOpencodeClient> {
+        const baseUrl = this.getBaseUrl(userId);
+        const server = this.serverRegistry?.getActive(userId);
+        if (server?.username && server?.password) {
+            const credentials = Buffer.from(`${server.username}:${server.password}`).toString("base64");
+            return createOpencodeClient({ baseUrl, headers: { Authorization: `Basic ${credentials}` } });
+        }
+        return createOpencodeClient({ baseUrl });
+    }
+
     private cleanupSessionState(sessionId: string): void {
         stopTypingIndicator(sessionId);
         cleanupTextState(sessionId);
@@ -83,8 +94,7 @@ export class OpenCodeService {
     // ─── Session lifecycle ───────────────────────────────────────────────────
 
     async createSession(userId: string, title?: string): Promise<UserSession> {
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             const result = await client.session.create({
@@ -128,8 +138,7 @@ export class OpenCodeService {
     }
 
     async attachSession(userId: string, sessionIdOrPrefix: string): Promise<{ session: UserSession; alreadyAttached: boolean } | null> {
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
         const state = this.getOrCreateUserState(userId);
 
         for (const [sid, sess] of state.sessions) {
@@ -229,8 +238,7 @@ export class OpenCodeService {
         const { sessionId } = userSession;
         this.cleanupSessionState(sessionId);
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             await client.session.delete({ sessionID: sessionId });
@@ -248,8 +256,7 @@ export class OpenCodeService {
         const userSession = this.getUserSession(userId);
         if (!userSession) return false;
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             await client.session.abort({ sessionID: userSession.sessionId });
@@ -302,8 +309,7 @@ export class OpenCodeService {
 
         while (!abortController.signal.aborted) {
             try {
-                const baseUrl = this.getBaseUrl(userId);
-                const client = createOpencodeClient({ baseUrl });
+                const client = this.createClientForUser(userId);
                 const events = await client.event.subscribe();
 
                 retries = 0;
@@ -373,8 +379,7 @@ export class OpenCodeService {
             throw new Error("No active session. Please use /opencode to start a session first.");
         }
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
         const fullPrompt = fileContext ? `${fileContext}\n\n${text}` : text;
 
         client.session.prompt({
@@ -383,7 +388,7 @@ export class OpenCodeService {
             agent: userSession.currentAgent,
         }).catch((error) => {
             if (error instanceof Error && (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED'))) {
-                console.error(`Cannot connect to OpenCode server at ${baseUrl}`);
+                console.error(`Cannot connect to OpenCode server at ${this.getBaseUrl(userId)}`);
             } else {
                 console.error("Prompt error:", error);
             }
@@ -391,8 +396,7 @@ export class OpenCodeService {
     }
 
     async resolveCommandName(input: string, userId: string): Promise<string | null> {
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
         try {
             const result = await client.command.list();
             if (!result.data) return null;
@@ -420,8 +424,7 @@ export class OpenCodeService {
         const resolvedName = await this.resolveCommandName(command, userId);
         if (!resolvedName) return false;
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         client.session.command({
             sessionID: userSession.sessionId,
@@ -430,7 +433,7 @@ export class OpenCodeService {
             agent: userSession.currentAgent,
         }).catch((error) => {
             if (error instanceof Error && (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED'))) {
-                console.error(`Cannot connect to OpenCode server at ${baseUrl}`);
+                console.error(`Cannot connect to OpenCode server at ${this.getBaseUrl(userId)}`);
             } else {
                 console.error("Command error:", error);
             }
@@ -443,8 +446,7 @@ export class OpenCodeService {
         const userSession = this.getUserSession(userId);
         if (!userSession) return { success: false, message: "No active session found" };
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             if (typeof client.session.revert !== 'function') {
@@ -462,8 +464,7 @@ export class OpenCodeService {
         const userSession = this.getUserSession(userId);
         if (!userSession) return { success: false, message: "No active session found" };
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             if (typeof client.session.unrevert !== 'function') {
@@ -483,8 +484,7 @@ export class OpenCodeService {
         const userSession = this.getUserSession(userId);
         if (!userSession) return [];
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             const result = await client.session.messages({
@@ -511,8 +511,7 @@ export class OpenCodeService {
     // ─── Agents ──────────────────────────────────────────────────────────────
 
     async getAvailableAgents(userId: string): Promise<Array<{ name: string; mode?: string; description?: string }>> {
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             const result = await client.app.agents();
@@ -561,8 +560,7 @@ export class OpenCodeService {
     // ─── Sessions & projects listing ─────────────────────────────────────────
 
     async getSessions(userId: string, limit = 10): Promise<Array<{ id: string; title: string; created: number; updated: number }>> {
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             const result = await client.session.list();
@@ -591,8 +589,7 @@ export class OpenCodeService {
         const userSession = this.getUserSession(userId);
         if (!userSession) return { success: false, message: "No active session found" };
 
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             await client.session.update({ sessionID: userSession.sessionId, title });
@@ -604,8 +601,7 @@ export class OpenCodeService {
     }
 
     async getProjects(userId: string): Promise<Array<{ id: string; worktree: string }>> {
-        const baseUrl = this.getBaseUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.createClientForUser(userId);
 
         try {
             const result = await client.project.list();

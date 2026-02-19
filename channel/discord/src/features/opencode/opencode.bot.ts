@@ -18,7 +18,6 @@ import {
     GatewayIntentBits,
     Events,
 } from "discord.js";
-import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import { OpenCodeService, setMessageDeleteTimeout } from "./opencode.service.js";
 import { ConfigService } from "../../services/config.service.js";
 import { ServerRegistry } from "../../services/server-registry.service.js";
@@ -90,7 +89,9 @@ export class DiscordBot {
             new SlashCommandBuilder().setName('server').setDescription('Manage servers')
                 .addSubcommand(sub => sub.setName('add').setDescription('Add a server')
                     .addStringOption(opt => opt.setName('url').setDescription('Server URL').setRequired(true))
-                    .addStringOption(opt => opt.setName('name').setDescription('Server name').setRequired(false)))
+                    .addStringOption(opt => opt.setName('name').setDescription('Server name').setRequired(false))
+                    .addStringOption(opt => opt.setName('username').setDescription('HTTP Basic Auth username (OPENCODE_SERVER_USERNAME)').setRequired(false))
+                    .addStringOption(opt => opt.setName('password').setDescription('HTTP Basic Auth password (OPENCODE_SERVER_PASSWORD)').setRequired(false)))
                 .addSubcommand(sub => sub.setName('remove').setDescription('Remove a server')
                     .addStringOption(opt => opt.setName('id').setDescription('Server ID').setRequired(true)))
                 .addSubcommand(sub => sub.setName('use').setDescription('Switch active server')
@@ -591,8 +592,9 @@ export class DiscordBot {
 
         pageItems.forEach((s, idx) => {
             const flag = s.isActive ? "●" : "·";
+            const authBadge = s.username ? " 🔐" : "";
             const lineNum = safePage * PAGE_SIZE + idx + 1;
-            lines.push(`${lineNum}. ${flag} \`${s.id}\`  **${s.name}**\n   ${s.url}`);
+            lines.push(`${lineNum}. ${flag} \`${s.id}\`  **${s.name}**${authBadge}\n   ${s.url}`);
             const btnLabel = (s.isActive ? "● " : "↩ ") + s.name.substring(0, 20);
             useButtons.push(
                 new ButtonBuilder()
@@ -602,7 +604,7 @@ export class DiscordBot {
             );
         });
 
-        const text = `**Servers (${servers.length})**\n\n${lines.join("\n\n")}\n\n● active  \`/server add <url> [name]\` to add`;
+        const text = `**Servers (${servers.length})**\n\n${lines.join("\n\n")}\n\n● active  🔐 auth configured\n\`/server add <url> [name] [username] [password]\` to add`;
 
         const components: any[] = [];
         for (let i = 0; i < useButtons.length; i += 5) {
@@ -622,6 +624,8 @@ export class DiscordBot {
             case 'add': {
                 const url = interaction.options.getString('url', true);
                 const name = interaction.options.getString('name') || undefined;
+                const username = interaction.options.getString('username') || undefined;
+                const password = interaction.options.getString('password') || undefined;
 
                 if (!url.startsWith("http://") && !url.startsWith("https://")) {
                     await interaction.reply({ content: 'Invalid URL. Must start with http:// or https://', ephemeral: true });
@@ -634,8 +638,12 @@ export class DiscordBot {
                     return;
                 }
 
-                const record = this.serverRegistry.add(userId, url, name);
-                await interaction.reply({ content: `Server added: **${record.name}**\nURL: ${record.url}\nID: \`${record.id}\``, ephemeral: true });
+                const record = this.serverRegistry.add(userId, url, name, false, username, password);
+                let replyText = `Server added: **${record.name}**\nURL: ${record.url}\nID: \`${record.id}\``;
+                if (record.username) {
+                    replyText += `\n🔐 Auth: ${record.username} / ***`;
+                }
+                await interaction.reply({ content: replyText, ephemeral: true });
                 break;
             }
             case 'remove': {
@@ -802,8 +810,7 @@ export class DiscordBot {
             return;
         }
 
-        const baseUrl = this.opencodeService.getServerUrl(userId);
-        const client = createOpencodeClient({ baseUrl });
+        const client = this.opencodeService.createClientForUser(userId);
 
         let allow = false;
         if (action === 'allow') allow = true;
