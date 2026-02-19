@@ -249,7 +249,10 @@ export class OpenCodeService {
 
         const { sessionId } = userSession;
 
-        this.stopEventStream(userId);
+        // Clean up only this session's local state (typing, text, tool, etc.)
+        // Do NOT stop the event stream — it's shared across all sessions for
+        // this user.  Stopping it would break background sessions and can
+        // cause reconnect attempts to a session that no longer exists.
         this.cleanupSessionState(sessionId);
 
         const baseUrl = this.getBaseUrl(userId);
@@ -264,20 +267,7 @@ export class OpenCodeService {
         state.sessions.delete(sessionId);
         state.activeSessionId = null;
 
-        // Auto-switch to most recently updated remaining session
-        let switchedTo: UserSession | undefined;
-        if (state.sessions.size > 0) {
-            const remaining = [...state.sessions.values()].sort(
-                (a, b) => (b.session.time.updated ?? 0) - (a.session.time.updated ?? 0)
-            );
-            const next = remaining[0];
-            next.isActive = true;
-            state.activeSessionId = next.sessionId;
-            switchedTo = next;
-        }
-
-        // Restart event stream if still have sessions
-        return { success: true, switchedTo };
+        return { success: true };
     }
 
     async abortSession(userId: number): Promise<boolean> {

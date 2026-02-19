@@ -164,7 +164,7 @@ export class OpenCodeBot {
                 '/history [n] - Show last N messages of current session (default 5)',
                 '/detach - Detach from current session (keeps it in background)',
                 '/rename &lt;title&gt; - Rename current session',
-                '/endsession - End current session (auto-switches to next if available)',
+                '/endsession - End and delete current session',
                 '',
                 '🖥️ <b>Server Commands:</b>',
                 '/servers - List configured opencode servers',
@@ -541,13 +541,7 @@ export class OpenCodeBot {
             const result = await this.opencodeService.deleteSession(userId);
 
             if (result.success) {
-                let msg = "✅ OpenCode session ended.";
-                if (result.switchedTo) {
-                    const title = escapeHtml(result.switchedTo.session.title || result.switchedTo.sessionId.substring(0, 8));
-                    msg += ` Switched to: <b>${title}</b>`;
-                } else {
-                    msg += " Use /opencode to start a new session.";
-                }
+                const msg = "✅ OpenCode session ended. Use /opencode to start a new session or /sessions to attach an existing one.";
                 const sentMessage = await ctx.reply(msg, { parse_mode: "HTML" });
                 await MessageUtils.scheduleMessageDeletion(ctx, sentMessage.message_id, this.configService.getMessageDeleteTimeout());
             } else {
