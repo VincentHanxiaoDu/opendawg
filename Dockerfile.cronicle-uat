@@ -1,0 +1,54 @@
+# Cronicle UAT image — extends the skill's Cronicle image with mock runners
+# so jobs actually execute during the UAT test suite.
+#
+# Build: docker build -f Dockerfile.cronicle-uat \
+#          --build-context skill=.opencode/skills/cron-scheduler/docker \
+#          -t opendog-cronicle-uat .
+FROM node:18-alpine
+
+RUN apk add --no-cache bash curl git procps openssl jq
+
+# ── Install Cronicle from source (same as skill Dockerfile) ──
+RUN mkdir -p /opt/cronicle \
+    && cd /opt/cronicle \
+    && curl -sL https://github.com/jhuckaby/Cronicle/archive/master.tar.gz \
+       | tar xz --strip-components=1 \
+    && npm install --production \
+    && node bin/build.js dist
+
+WORKDIR /opt/cronicle
+
+# ── Copy skill entrypoint ─────────────────────────────────────
+COPY .opencode/skills/cron-scheduler/docker/entrypoint.sh /opt/cronicle/entrypoint.sh
+RUN chmod +x /opt/cronicle/entrypoint.sh
+
+# ── Install mock runners for UAT job execution ───────────────
+RUN cat > /usr/local/bin/job_runner << 'SCRIPT' \
+&& chmod +x /usr/local/bin/job_runner
+#!/bin/sh
+echo "[job_runner] UAT execution at $(date)"
+echo "[job_runner] PID=$$  ARGS=$*"
+case "$1" in
+  --sleep)  echo "[job_runner] Sleeping ${2:-5}s..."; sleep "${2:-5}" ;;
+  --fail)   echo "[job_runner] Simulated failure"; exit 42 ;;
+  *)        echo "[job_runner] Task: $*" ;;
+esac
+echo "[job_runner] Done"
+exit 0
+SCRIPT
+
+RUN cat > /usr/local/bin/opencode << 'SCRIPT' \
+&& chmod +x /usr/local/bin/opencode \
+&& ln -sf /usr/local/bin/opencode /opt/cronicle/opencode
+#!/bin/sh
+echo "[mock-opencode] invoked: opencode $@"
+SESSION=$(echo "$@" | tr ' ' '\n' | grep -A1 -- '-s' | tail -1 || true)
+echo "[mock-opencode] session=${SESSION}"
+echo "[mock-opencode] Done (mock)"
+exit 0
+SCRIPT
+
+VOLUME ["/opt/cronicle/data", "/opt/cronicle/logs"]
+EXPOSE 3012
+
+ENTRYPOINT ["/opt/cronicle/entrypoint.sh"]
