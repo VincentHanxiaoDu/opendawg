@@ -481,24 +481,27 @@ export class OpenCodeBot {
 
             const session = this.opencodeService.getUserSession(userId)!;
             const title = escapeHtml(session.session.title || "Untitled");
-            const lines = history.map(msg => {
-                const prefix = msg.role === "user" ? "[You]" : "[AI] ";
+            const timeout = this.configService.getMessageDeleteTimeout();
+
+            // Send header
+            const header = await ctx.reply(`📜 <b>Last ${history.length} messages — ${title}</b>`, { parse_mode: "HTML" });
+            await MessageUtils.scheduleMessageDeletion(ctx, header.message_id, timeout);
+
+            // Replay each message individually
+            for (const msg of history) {
+                const prefix = msg.role === "user" ? "👤 <b>You</b>" : "🤖 <b>AI</b>";
                 const t = new Date(msg.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                return `<b>${prefix}</b> <i>${t}</i>\n${escapeHtml(msg.text)}`;
-            });
+                const bodyHtml = escapeHtml(msg.text);
+                const msgText = `${prefix} <i>${t}</i>\n${bodyHtml}`;
 
-            const fullText = `📜 <b>Last ${history.length} messages — ${title}</b>\n\n${lines.join("\n\n")}`;
-
-            if (fullText.length > 3800) {
-                const plain = history.map(m =>
-                    `[${m.role === "user" ? "You" : "AI"}] ${new Date(m.time * 1000).toLocaleTimeString()}\n${m.text}`
-                ).join("\n\n");
-                const buf = Buffer.from(plain, "utf-8");
-                const sent = await ctx.replyWithDocument(new InputFile(buf, "history.txt"));
-                await MessageUtils.scheduleMessageDeletion(ctx, sent.message_id, this.configService.getMessageDeleteTimeout());
-            } else {
-                const m = await ctx.reply(fullText, { parse_mode: "HTML" });
-                await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                let sent;
+                if (msgText.length > 4000) {
+                    const buf = Buffer.from(`[${msg.role === "user" ? "You" : "AI"}] ${new Date(msg.time * 1000).toLocaleTimeString()}\n${msg.text}`, "utf-8");
+                    sent = await ctx.replyWithDocument(new InputFile(buf, `msg_${t.replace(":", "-")}.txt`));
+                } else {
+                    sent = await ctx.reply(msgText, { parse_mode: "HTML" });
+                }
+                await MessageUtils.scheduleMessageDeletion(ctx, sent.message_id, timeout);
             }
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("fetch history", error));

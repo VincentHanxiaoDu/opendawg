@@ -503,23 +503,23 @@ export class DiscordBot {
 
         const session = this.opencodeService.getUserSession(userId)!;
         const title = session.session.title || "Untitled";
-        const lines = history.map(msg => {
-            const prefix = msg.role === "user" ? "[You]" : "[AI]";
+
+        // Send header as the deferred reply
+        await interaction.editReply(`**📜 Last ${history.length} messages — ${title}**`);
+
+        // Replay each message individually as follow-ups
+        for (const msg of history) {
+            const prefix = msg.role === "user" ? "👤 **You**" : "🤖 **AI**";
             const t = new Date(msg.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-            return `**${prefix}** *${t}*\n${msg.text}`;
-        });
+            const msgText = `${prefix} *${t}*\n${msg.text}`;
 
-        const fullText = `**Last ${history.length} messages — ${title}**\n\n${lines.join("\n\n")}`;
-
-        if (fullText.length > 1900) {
-            const plain = history.map(m =>
-                `[${m.role === "user" ? "You" : "AI"}] ${new Date(m.time * 1000).toLocaleTimeString()}\n${m.text}`
-            ).join("\n\n");
-            const buf = Buffer.from(plain, "utf-8");
-            const attachment = new AttachmentBuilder(buf, { name: "history.txt" });
-            await interaction.editReply({ files: [attachment] });
-        } else {
-            await interaction.editReply(fullText);
+            if (msgText.length > 1900) {
+                const buf = Buffer.from(`[${msg.role === "user" ? "You" : "AI"}] ${new Date(msg.time * 1000).toLocaleTimeString()}\n${msg.text}`, "utf-8");
+                const attachment = new AttachmentBuilder(buf, { name: `msg_${t.replace(":", "-")}.txt` });
+                await interaction.followUp({ files: [attachment], ephemeral: true });
+            } else {
+                await interaction.followUp({ content: msgText, ephemeral: true });
+            }
         }
     }
 

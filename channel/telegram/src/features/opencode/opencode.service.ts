@@ -543,8 +543,8 @@ export class OpenCodeService {
                 // Extract text from parts
                 const textParts = (msg.parts ?? [])
                     .filter((p: any) => p.type === "text" && p.text)
-                    .map((p: any) => (p.text as string).substring(0, 200));
-                const text = textParts.join(" ").trim() || "(no text)";
+                    .map((p: any) => p.text as string);
+                const text = textParts.join("").trim() || "(no text)";
                 return { role, text, time: msg.info?.time?.created ?? 0 };
             });
         } catch (error) {

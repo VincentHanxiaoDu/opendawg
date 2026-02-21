@@ -38,6 +38,8 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
         const callID: string | undefined = part.callID || part.id;
         if (!callID) return;
 
+        const isCompleted = part.state?.status === "completed" || part.state?.output !== undefined;
+
         let toolText = `[Tool] 🔧 ${part.tool}`;
 
         if (verbosity >= 2 && part.state?.input) {
@@ -59,12 +61,18 @@ export async function handleToolPart(ctx: Context, part: any, userSession: UserS
         const existingMsgId = toolMessages.get(callID);
 
         if (existingMsgId) {
+            // Always edit the existing message — never send a new one for the same callID
             const chatId = ctx.chat?.id;
             if (!chatId) return;
             try {
                 await ctx.api.editMessageText(chatId, existingMsgId, toolText);
-            } catch {}
-        } else {
+            } catch {
+                // Edit failed (identical text, deleted, etc.) — ignore, message already visible
+            }
+        } else if (!isCompleted) {
+            // Only send a new message for the initial (non-completed) event.
+            // If we somehow receive a completed event with no prior message, skip it —
+            // this prevents the duplicate that occurs when the map was already cleared.
             const sentMessage = await ctx.reply(toolText);
             toolMessages.set(callID, sentMessage.message_id);
         }
