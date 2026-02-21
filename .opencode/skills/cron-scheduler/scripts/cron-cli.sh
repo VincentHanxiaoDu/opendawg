@@ -115,7 +115,7 @@ cmd_start() {
     local resp
     resp=$(curl -sf "http://localhost:${CRONICLE_PORT}/api/app/get_activity?offset=0&limit=1&api_key=${CRONICLE_API_KEY}" 2>/dev/null || echo "")
     local code
-    code=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))" 2>/dev/null || echo "")
+    code=$(echo "$resp" | jq -r '.code // ""' 2>/dev/null || echo "")
     if [[ "$code" == "0" ]]; then
       echo "[cron-cli] Cronicle is ready at http://localhost:${CRONICLE_PORT}"
       echo "[cron-cli] Web UI: http://localhost:${CRONICLE_PORT}"
@@ -125,7 +125,7 @@ cmd_start() {
         config-cli set CRONICLE_URL "http://localhost:${CRONICLE_PORT}" 2>/dev/null || true
         config-cli set CRONICLE_API_KEY "$CRONICLE_API_KEY" 2>/dev/null || true
         local secret
-        secret=$(sudo python3 -c "import json; print(json.load(open('${CRONICLE_INSTALL_DIR}/conf/config.json'))['secret_key'])" 2>/dev/null || echo "")
+        secret=$(sudo jq -r '.secret_key // ""' "${CRONICLE_INSTALL_DIR}/conf/config.json" 2>/dev/null || echo "")
         if [[ -n "$secret" ]]; then
           config-cli set CRONICLE_SECRET "$secret" 2>/dev/null || true
         fi
@@ -139,7 +139,7 @@ cmd_start() {
       local resp2
       resp2=$(curl -sf "http://localhost:${CRONICLE_PORT}/api/app/get_activity?offset=0&limit=1" 2>/dev/null || echo "")
       local code2
-      code2=$(echo "$resp2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))" 2>/dev/null || echo "")
+      code2=$(echo "$resp2" | jq -r '.code // ""' 2>/dev/null || echo "")
       if [[ "$code2" == "session" || "$code2" == "api" ]]; then
         # Server is master, create API key
         echo "[cron-cli] Creating API key..."
@@ -217,7 +217,7 @@ cmd_status() {
     local result
     if result=$(curl -sf "${CRONICLE_URL}/api/app/get_activity?offset=0&limit=1&api_key=${CRONICLE_API_KEY}" 2>/dev/null); then
       local code
-      code=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code','error'))" 2>/dev/null || echo "error")
+      code=$(echo "$result" | jq -r '.code // "error"' 2>/dev/null || echo "error")
       if [[ "$code" == "0" ]]; then
         echo "  Status: HEALTHY"
         echo "  URL: ${CRONICLE_URL}"
@@ -273,23 +273,32 @@ cmd_clear() {
 
   inject_secrets
 
-  # Get all events and delete them
-  local result
-  result=$(curl -sf "${CRONICLE_URL}/api/app/get_schedule/v1?limit=1000" \
-    -H "X-API-Key: ${CRONICLE_API_KEY}" 2>/dev/null) || {
-    echo "Error: Cannot reach Cronicle" >&2
-    return 1
-  }
+  # Paginate through all jobs and delete them (no 1000-job cap)
+  local count=0 offset=0 page_size=100
+  while true; do
+    local result
+    result=$(curl -sf "${CRONICLE_URL}/api/app/get_schedule/v1?offset=${offset}&limit=${page_size}" \
+      -H "X-API-Key: ${CRONICLE_API_KEY}" 2>/dev/null) || {
+      echo "Error: Cannot reach Cronicle" >&2
+      return 1
+    }
 
-  local ids
-  ids=$(echo "$result" | jq -r '.rows[]?.id // empty')
-  local count=0
-  for id in $ids; do
-    curl -sf -X POST "${CRONICLE_URL}/api/app/delete_event/v1" \
-      -H "X-API-Key: ${CRONICLE_API_KEY}" \
-      -H "Content-Type: application/json" \
-      -d "{\"id\":\"${id}\"}" &>/dev/null || true
-    count=$((count + 1))
+    local ids
+    ids=$(echo "$result" | jq -r '.rows[]?.id // empty')
+    [[ -z "$ids" ]] && break
+
+    for id in $ids; do
+      curl -sf -X POST "${CRONICLE_URL}/api/app/delete_event/v1" \
+        -H "X-API-Key: ${CRONICLE_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"id\":\"${id}\"}" &>/dev/null || true
+      count=$((count + 1))
+    done
+
+    local returned
+    returned=$(echo "$result" | jq -r '.rows | length')
+    (( returned < page_size )) && break
+    offset=$((offset + page_size))
   done
 
   echo "Deleted ${count} jobs."

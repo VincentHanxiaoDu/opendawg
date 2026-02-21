@@ -10,6 +10,8 @@ WORKER_TAGS=""
 INSTALL_DIR="/opt/cronicle"
 WORKER_PORT="3014"
 CRONICLE_USER="cronicle"
+# Pinned release — update intentionally when upgrading Cronicle
+CRONICLE_VERSION="${CRONICLE_VERSION:-v0.9.106}"
 
 usage() {
   cat <<'EOF'
@@ -118,10 +120,11 @@ mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 if [[ ! -f "${INSTALL_DIR}/package.json" ]]; then
-  curl -sL https://github.com/jhuckaby/Cronicle/archive/master.tar.gz | tar xz --strip-components=1
+  echo "[worker-install] Downloading Cronicle ${CRONICLE_VERSION}..."
+  curl -sL "https://github.com/jhuckaby/Cronicle/archive/refs/tags/${CRONICLE_VERSION}.tar.gz" | tar xz --strip-components=1
   npm install --production
   node bin/build.js dist
-  echo "[worker-install] Cronicle installed."
+  echo "[worker-install] Cronicle ${CRONICLE_VERSION} installed."
 else
   echo "[worker-install] Cronicle already installed, updating config..."
 fi
@@ -133,6 +136,12 @@ echo "[worker-install] Configuring as worker..."
 MASTER_HOST=$(echo "$CRONICLE_SERVER" | sed -E 's|https?://||' | sed -E 's|:[0-9]+||' | sed -E 's|/.*||')
 MASTER_PORT=$(echo "$CRONICLE_SERVER" | grep -oE ':[0-9]+' | tr -d ':')
 MASTER_PORT="${MASTER_PORT:-3012}"
+
+# Build tags JSON array for server_groups (empty string → no groups)
+TAGS_JSON="[]"
+if [[ -n "$WORKER_TAGS" ]]; then
+  TAGS_JSON=$(echo "$WORKER_TAGS" | tr ',' '\n' | jq -Rn '[inputs | select(length > 0)]')
+fi
 
 # Generate config.json for worker
 cat > "${INSTALL_DIR}/conf/config.json" << CFGEOF
@@ -202,7 +211,9 @@ cat > "${INSTALL_DIR}/conf/config.json" << CFGEOF
 
   "email_templates": {
     "source": "conf/emails"
-  }
+  },
+
+  "server_groups": ${TAGS_JSON}
 }
 CFGEOF
 
@@ -258,7 +269,7 @@ echo "[worker-install] Installation complete!"
 echo "  Install dir: ${INSTALL_DIR}"
 echo "  Master: ${CRONICLE_SERVER}"
 echo "  Config: ${INSTALL_DIR}/conf/config.json"
-[[ -n "$WORKER_TAGS" ]] && echo "  Tags: ${WORKER_TAGS} (assign via Cronicle Web UI > Servers tab)"
+  [[ -n "$WORKER_TAGS" ]] && echo "  Tags: ${WORKER_TAGS} (written to config.json as server_groups)"
 echo ""
-echo "  Worker tags must be assigned via the Cronicle Web UI:"
-echo "  ${CRONICLE_SERVER} > Servers tab > Edit server groups"
+echo "  To update tags after install, re-run install or edit:"
+echo "  ${INSTALL_DIR}/conf/config.json (server_groups field)"
