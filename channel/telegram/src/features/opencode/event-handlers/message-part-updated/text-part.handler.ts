@@ -64,6 +64,15 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
         const streamingText = `[Streaming] ✍️\n${formatAsHtml(limitedText)}`;
 
         if (!state.updateMessageId) {
+            // Don't send an empty streaming placeholder — wait until there's actual content.
+            // This avoids a blank "[Streaming] ✍️" message when the first text part event
+            // arrives with an empty or whitespace-only string.
+            if (!text.trim()) {
+                state.finalizeTimeout = setTimeout(() => {
+                    finalizeTextMessage(sessionId, ctx);
+                }, 5000);
+                return;
+            }
             const sentMessage = await ctx.reply(streamingText, { parse_mode: "HTML" });
             state.updateMessageId = sentMessage.message_id;
             state.lastUpdateTime = now;

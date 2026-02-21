@@ -19,7 +19,12 @@ export default async function sessionIdleHandler(
     stopTypingIndicator(sessionId);
     await finalizeTextMessage(sessionId, ctx);
     await cleanupReasoningMessages(sessionId, ctx);
-    clearToolCallMessages(sessionId);
+
+    // Delay clearing tool messages to allow in-flight "completed" part events to
+    // arrive and edit their existing Telegram messages before the map is wiped.
+    // Without this delay, session.idle can race ahead of the final tool part
+    // update, causing the completed event to re-send a duplicate message.
+    setTimeout(() => clearToolCallMessages(sessionId), 3000);
     
     return null;
 }
