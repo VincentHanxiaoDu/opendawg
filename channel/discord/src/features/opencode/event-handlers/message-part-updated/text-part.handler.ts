@@ -169,11 +169,9 @@ export async function finalizeTextMessage(sessionId: string, client: Client): Pr
             const msg = await channel.messages.fetch(msgId);
             await msg.edit(savedText);
         } catch {
-            try {
-                const msg = await channel.messages.fetch(msgId);
-                if (msg.deletable) await msg.delete();
-            } catch {}
+            // Edit failed — send new message first, then delete old one async to prevent gap/duplicate
             try { await channel.send(savedText); } catch {}
+            channel.messages.fetch(msgId).then(msg => { if (msg.deletable) msg.delete(); }).catch(() => {});
         }
     } else {
         try { await channel.send(savedText); } catch {}
