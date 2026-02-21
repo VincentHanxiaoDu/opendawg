@@ -43,6 +43,8 @@ export async function handleToolPart(
         const callID: string | undefined = part.callID || part.id;
         if (!callID) return;
 
+        const isCompleted = part.state?.status === "completed" || part.state?.output !== undefined;
+
         let toolText = `[Tool] ${part.tool}`;
 
         if (verbosity >= 2 && part.state?.input) {
@@ -69,11 +71,17 @@ export async function handleToolPart(
         const existingMsgId = toolMessages.get(callID);
 
         if (existingMsgId) {
+            // Always edit the existing message — never send a new one for the same callID
             try {
                 const msg = await channel.messages.fetch(existingMsgId);
                 await msg.edit(toolText);
-            } catch {}
-        } else {
+            } catch {
+                // Edit failed (deleted, identical text, etc.) — ignore
+            }
+        } else if (!isCompleted) {
+            // Only send a new message for the initial (non-completed) event.
+            // If a completed event arrives with no prior message, skip it —
+            // this prevents the duplicate that occurs when the map was already cleared.
             const sentMessage = await channel.send(toolText);
             toolMessages.set(callID, sentMessage.id);
         }
