@@ -7,14 +7,17 @@ description: AI cron/scheduler skill based on Cronicle — create, manage, and m
 
 Distributed cron/scheduler for AI agents, backed by [Cronicle](https://github.com/jhuckaby/Cronicle).
 
-Two scripts, two audiences:
+**Host-native architecture**: Cronicle runs as a systemd service on the host (not Docker). The master server handles both scheduling and local job execution. Remote workers can be added via `cron-client install`.
+
+Three scripts, three roles:
 
 | Script | Audience | Capabilities |
 |--------|----------|-------------|
-| **`cron-agent.sh`** | AI agents | Job CRUD, run-now, query history, health check. No service management. |
-| **`cron-cli.sh`** | Humans / admin | Full access: everything above + start/stop, install-cmd, clear |
+| **`cron-agent.sh`** | AI agents | Job CRUD, run-now, query history, callback. No service management. |
+| **`cron-cli.sh`** | Humans / admin | Full access: everything above + start/stop server, clear |
+| **`cron-client.sh`** | Host setup | Install/status/uninstall Cronicle worker on host |
 
-**Agents use `cron-agent`**. Humans use `cron-cli`.
+**Agents use `cron-agent`**. Humans use `cron-cli`. Workers are managed via `cron-client`.
 
 ## Behavior Rules
 
@@ -27,33 +30,46 @@ Always validate JobSpec before calling `create`:
 
 ### 2. Use Callbacks for Agent Wake-up
 
-To schedule an agent to wake up on a timer:
+To schedule periodic delivery of a prompt or script output into an existing opencode session:
 
 ```bash
+# Script mode: run shell command, deliver output to session (recommended for data collection)
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "*/10 * * * *" \
+  --script "uptime && free -h && df -h /"
+
+# Direct prompt mode: inject a prompt into the session
 cron-agent callback \
   --session ses_abc123 \
   --schedule "0 9 * * *" \
   --prompt "Generate daily report"
+
+# Isolated agent mode: run prompt in new session, deliver result to callback session
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "0 8 * * 1" \
+  --prompt "Fetch weekly metrics from API and summarize" \
+  --isolated
 ```
 
-This creates a job that runs `opencode run -s ses_abc123 -p "Generate daily report"` on schedule.
+**Delivery mechanism**: Phase 2 injects the result into the callback session via the opencode HTTP API (`POST /session/{id}/prompt_async`, returns 204). This avoids the `opencode run -s` CLI which can fail with *"This model does not support assistant message prefill"* when the session's last message is already an assistant reply.
 
-### 3. Secret Injection
+If the opencode server requires Basic Auth, set `--auth user:password` or store `OPENCODE_AUTH` in the config-cli vault.
 
-All sensitive values are injected via `config-cli`:
+### 3. Server Config Auto-Discovery
 
-```bash
-config-cli set CRONICLE_API_KEY <key>
-```
+Server config (`CRONICLE_URL`, `CRONICLE_API_KEY`, `CRONICLE_SECRET`) is automatically:
+- **Written to vault** by `cron-cli start` after server startup
+- **Read from vault** by `cron-agent`, `cron-client`, and `setup.sh`
 
-The scripts auto-detect and load from the vault.
+No manual env var configuration needed when using config-cli vault.
 
 ### 4. Runner Whitelist
 
 Only whitelisted runners can be used in jobs. Default whitelist:
-- `opencode` — for session callbacks
-- `/usr/local/bin/job_runner` — generic runner
-- `/usr/local/bin/opencode` — explicit path
+- `bash` / `/bin/bash` / `/bin/sh` — for shell scripts (used by callback jobs)
+- `curl` — for HTTP-based triggers
 
 Custom runners: add to `.opencode/skills/cron-scheduler/runners.conf`
 
@@ -67,13 +83,33 @@ Custom runners: add to `.opencode/skills/cron-scheduler/runners.conf`
 
 ## Prerequisites
 
-1. **Docker** with Compose V2
+1. **Node.js** 18+ (for Cronicle)
 2. **curl** and **jq** for API calls
-3. **config-cli** (optional, for secret management)
+3. **config-cli** (optional, for secret management and auto-discovery)
+4. **systemd** (for service management; optional, can run manually)
 
 Install:
 ```bash
 bash .opencode/skills/cron-scheduler/scripts/install.sh
+```
+
+## Quick Start
+
+```bash
+# 1. Install the skill
+bash .opencode/skills/cron-scheduler/scripts/install.sh
+
+# 2. Start the master server (auto-writes config to vault)
+cron-cli start
+
+# 3. Schedule a callback — delivers output to session every 10 minutes
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "*/10 * * * *" \
+  --script "uptime && free -h && df -h /"
+
+# 4. (Optional) Add a remote worker
+# On the remote host: cron-client install
 ```
 
 ## Agent Commands (`cron-agent`)
@@ -92,7 +128,7 @@ bash .opencode/skills/cron-scheduler/scripts/install.sh
 | `cron-agent execution <id>` | Get execution details |
 | `cron-agent active` | List currently running jobs |
 | `cron-agent health` | Server health check |
-| `cron-agent callback [flags]` | Create opencode callback job |
+| `cron-agent callback [flags]` | Create session callback job — delivers script output or prompt to session via HTTP API |
 
 ## Admin Commands (`cron-cli`)
 
@@ -100,171 +136,128 @@ All agent commands above, plus:
 
 | Command | Description |
 |---------|-------------|
-| `cron-cli start` | Start Cronicle server (Docker) |
+| `cron-cli start` | Start Cronicle master (host systemd), write config to vault |
 | `cron-cli stop` | Stop Cronicle server |
 | `cron-cli status` | Show service status |
 | `cron-cli install-cmd [flags]` | Generate worker install command |
 | `cron-cli clear --confirm` | Delete ALL jobs |
 
-## JobSpec Format
+## Client Commands (`cron-client`)
 
-AI agents use this JSON format to create jobs:
-
-```json
-{
-  "name": "daily_report",
-  "enabled": true,
-  "schedule": {
-    "type": "cron",
-    "expr": "0 9 * * *",
-    "timezone": "America/Los_Angeles"
-  },
-  "target": {
-    "hostname": "worker-1"
-  },
-  "execution": {
-    "runner": "opencode",
-    "args": ["run", "-s", "ses_abc123", "-p", "Generate report"]
-  },
-  "policy": {
-    "timeout_sec": 900,
-    "retries": 2
-  }
-}
-```
-
-### JobSpec Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Job display name (unique) |
-| `enabled` | No | Active state (default: true) |
-| `schedule.type` | Yes | `cron`, `every`, or `once` |
-| `schedule.expr` | Yes | Schedule expression |
-| `schedule.timezone` | No | IANA timezone (default: UTC) |
-| `target.hostname` | No | Specific worker hostname |
-| `execution.runner` | Yes | Runner binary path (must be whitelisted) |
-| `execution.args` | No | Arguments array |
-| `policy.timeout_sec` | No | Max execution time in seconds |
-| `policy.retries` | No | Retry count on failure |
-
-## Workflow Examples
-
-### Agent: Create and Monitor a Job
-
-```bash
-# Create a cron job
-cron-agent create '{
-  "name": "cleanup_logs",
-  "enabled": true,
-  "schedule": {"type": "cron", "expr": "0 2 * * *"},
-  "execution": {"runner": "/usr/local/bin/job_runner", "args": ["--task", "cleanup"]},
-  "policy": {"timeout_sec": 300}
-}'
-
-# List all jobs
-cron-agent list
-
-# Check execution history
-cron-agent history <event_id>
-
-# Trigger manually
-cron-agent run <event_id>
-
-# Check running jobs
-cron-agent active
-```
-
-### Agent: Schedule Self Wake-up
-
-```bash
-# Wake this agent every morning at 9am
-cron-agent callback \
-  --session ses_my_session \
-  --schedule "0 9 * * *" \
-  --prompt "Check overnight alerts and summarize"
-```
-
-### Agent: Schedule Another Agent
-
-```bash
-# Create a new agent session, get session ID
-# Then schedule periodic wake-up
-cron-agent callback \
-  --session ses_other_agent \
-  --schedule "*/30 * * * *" \
-  --prompt "Poll API for new data and process"
-```
-
-### Admin: Full Lifecycle
-
-```bash
-# Install the skill
-bash .opencode/skills/cron-scheduler/scripts/install.sh
-
-# Store API key
-config-cli set CRONICLE_API_KEY $(openssl rand -hex 16)
-
-# Start server
-cron-cli start
-
-# Check status
-cron-cli status
-
-# Generate worker install command
-cron-cli install-cmd --server-url http://master:3012 --tags ops
-
-# Stop server
-cron-cli stop
-```
+| Command | Description |
+|---------|-------------|
+| `cron-client install [--server-url <url>] [--secret <key>]` | Install Cronicle worker on host |
+| `cron-client status` | Show worker status and connection info |
+| `cron-client uninstall [--purge]` | Stop and remove worker |
 
 ## Architecture
 
 ```
-AI Agent ──→ cron-agent.sh ──→ Cronicle REST API ──→ Cronicle Master
-                                                         │
-                                                    ┌────┴────┐
-                                                    ▼         ▼
-                                               Worker 1   Worker N
-                                               (execute)  (execute)
-                                                    │         │
-                                                    ▼         ▼
-                                               Results → Cronicle → Web UI
+┌──────────────────────────┐
+│  Primary Host            │
+│  Cronicle Master         │        ┌──────────────────────┐
+│  (systemd service)       │        │  Host B (remote)     │
+│  - Scheduling + local    │◄──────►│  Cronicle Worker     │
+│    job execution         │  TCP   │  executes:           │
+│  - REST API on :3012     │        │  opendawg-agent.sh   │
+│  - Web UI                │        └──────────────────────┘
+│  - opendawg-agent.sh     │               ▲
+│    runs directly on host │               │ same flow
+└──────────────────────────┘               ▼
+                                   ┌──────────────────────┐
+                                   │  Host C (remote)     │
+                                   │  Cronicle Worker     │
+                                   │  opendawg-agent.sh   │
+                                   └──────────────────────┘
 ```
 
-- **Cronicle Master**: Docker container, port 3012, SQLite-like filesystem storage
-- **Workers**: Cronicle worker nodes on any host machine
-- **Web UI**: Built-in at `http://localhost:3012` — jobs, executions, logs, workers
-- **API Auth**: API key via `X-API-Key` header
-- **Storage**: Docker volume `cronicle_data` for persistence
+- **Cronicle Master**: Host-native systemd service (not Docker), port 3012
+- **Local execution**: Master runs jobs locally on the primary host (no separate worker needed)
+- **Remote workers**: Installed on other machines via `cron-client install`
+- **Execution**: Jobs invoke `opendawg-agent.sh` with full host environment
+- **Config**: Server config auto-propagated via config-cli vault
+- **Web UI**: Built-in at `http://localhost:3012`
+
+## Config Propagation Flow
+
+```
+cron-cli start
+  → writes CRONICLE_URL, CRONICLE_API_KEY, CRONICLE_SECRET to vault
+
+setup.sh (on any host)
+  → reads vault → auto-installs cron worker → worker connects to server
+
+cron-agent callback
+  → reads vault for API key → creates job targeting host worker
+```
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CRONICLE_URL` | Server URL | `http://localhost:3012` |
-| `CRONICLE_API_KEY` | API key for auth | (from config-cli vault) |
+| `CRONICLE_URL` | Server URL (auto from vault) | `http://localhost:3012` |
+| `CRONICLE_API_KEY` | API key for auth (auto from vault) | (from config-cli vault) |
 | `CRONICLE_PORT` | Web UI / API port | `3012` |
-| `CRONICLE_SECRET` | Multi-server shared secret | (auto-generated) |
+| `CRONICLE_SECRET` | Multi-server shared secret (auto from vault) | (auto-generated) |
 | `CRON_RUNNER_WHITELIST` | Path to runners.conf | (skill default) |
+| `OPENCODE_SERVER_URL` | opencode server URL for session callbacks | `http://localhost:4096` |
+| `OPENCODE_AUTH` | Basic Auth for opencode server (`user:password`) | (from config-cli vault) |
 
-## Worker Installation
+`OPENCODE_SERVER_URL` and `OPENCODE_AUTH` are auto-read from config-cli vault (keys: `OPENCODE_SERVER_URL`, `OPENCODE_AUTH`) if not set in environment.
 
-Install a Cronicle worker on a remote machine:
+## Callback Details
+
+The `callback` command creates a Cronicle job with a two-phase bash script:
+
+**Phase 1** — Execute task:
+- `--script "cmd"`: runs the shell command, captures stdout+stderr
+- `--prompt "text" --isolated`: runs `opendawg-agent.sh "<prompt>"` in a **new** session, captures output
+- `--prompt "text"`: skips Phase 1; the prompt itself is the delivery message
+
+**Phase 2** — Deliver to session:
+- Injects the result (or prompt) into the callback session via **opencode HTTP API**:
+  ```
+  POST {OPENCODE_SERVER_URL}/session/{sessionID}/prompt_async
+  Body: {"parts":[{"type":"text","text":"<delivery_message>"}]}
+  Returns: 204 No Content
+  ```
+- **Does NOT use `opencode run -s`** — avoids the assistant-message-prefill error that occurs when the session's conversation already ends with an assistant reply
 
 ```bash
-bash install-worker.sh \
-  --server http://master:3012 \
-  --secret <shared_secret> \
-  --tags ops,linux
-```
+# Script mode (recommended for data/monitoring tasks)
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "*/10 * * * *" \
+  --script "uptime && free -h"
 
-The script:
-1. Installs Node.js if needed
-2. Downloads and builds Cronicle
-3. Configures as worker with the master's secret key
-4. Creates a systemd service
-5. Starts and verifies connection
+# Direct prompt mode
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "0 9 * * *" \
+  --prompt "Generate daily report"
+
+# Isolated agent mode (for tasks needing full agent capability)
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "0 8 * * 1" \
+  --prompt "Fetch and analyze weekly metrics" \
+  --isolated
+
+# With auth (when opencode server has Basic Auth enabled)
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "0 * * * *" \
+  --script "df -h /" \
+  --server-url "http://192.168.1.100:4096" \
+  --auth "user:password"
+
+# Target a specific host worker
+cron-agent callback \
+  --session ses_abc123 \
+  --schedule "*/30 * * * *" \
+  --host worker-2 \
+  --script "check-service.sh"
+```
 
 ## Monitoring
 

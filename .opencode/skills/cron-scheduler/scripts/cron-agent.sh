@@ -4,17 +4,19 @@
 # For admin operations (start/stop/install), see cron-cli.sh.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 export PATH="${OPENDAWG_ROOT}/.opendawg/bin:${PATH}"
 
 # --- Defaults (overridden by env or config-cli vault) ---
 CRONICLE_URL="${CRONICLE_URL:-http://localhost:3012}"
 CRONICLE_API_KEY="${CRONICLE_API_KEY:-}"
+OPENCODE_SERVER_URL="${OPENCODE_SERVER_URL:-http://localhost:4096}"
+OPENCODE_AUTH="${OPENCODE_AUTH:-}"  # Optional Basic Auth: "user:password"
 
 # Runner whitelist — only these runners are allowed
 RUNNER_WHITELIST_FILE="${CRON_RUNNER_WHITELIST:-${OPENDAWG_ROOT}/.opencode/skills/cron-scheduler/runners.conf}"
-DEFAULT_RUNNERS=("opencode" "/usr/local/bin/job_runner" "/usr/local/bin/opencode")
+DEFAULT_RUNNERS=("bash" "/bin/bash" "/bin/sh" "curl" "/usr/local/bin/job_runner")
 
 usage() {
   cat <<'EOF'
@@ -39,13 +41,26 @@ System:
   health                              Server health check
 
 Convenience:
-  callback --session <id> --schedule <cron> [--name <name>] [--prompt <text>]
-                                      Create opencode callback job
+  callback --session <id> --schedule <cron> [options]
+    --script <cmd>          Script mode: run shell command, deliver output to session
+    --prompt <text>         Agent mode: run prompt (in session or isolated)
+    --isolated              Run prompt in new session, deliver result to callback session
+    --name <name>           Job name (default: callback-<session>)
+    --host <hostname>       Target host (default: current hostname)
+    --server-url <url>      OpenCode server URL (default: OPENCODE_SERVER_URL or http://localhost:4096)
+    --auth <user:password>  Basic Auth for OpenCode server (default: OPENCODE_AUTH)
+
+  Modes:
+    --script "cmd"                    Run cmd, inject output to session via HTTP API
+    --prompt "text" --isolated        Run agent in new session, inject result to session via HTTP API
+    --prompt "text"                   Inject prompt directly to session via HTTP API
 
 Environment:
   CRONICLE_URL                        Server URL (default: http://localhost:3012)
   CRONICLE_API_KEY                    API key for authentication
   CRON_RUNNER_WHITELIST               Path to runners.conf whitelist file
+  OPENCODE_SERVER_URL                 OpenCode server URL for session callbacks (default: http://localhost:4096)
+  OPENCODE_AUTH                       Basic Auth credentials for OpenCode server (user:password)
 EOF
 }
 
@@ -62,9 +77,28 @@ check_prereq() {
 }
 
 inject_secrets() {
-  # Inject from config-cli vault if available and key not already set
-  if [[ -z "$CRONICLE_API_KEY" ]] && command -v config-cli &>/dev/null; then
-    CRONICLE_API_KEY="$(config-cli get CRONICLE_API_KEY 2>/dev/null || true)"
+  # Inject from config-cli vault if available and values not already set
+  if command -v config-cli &>/dev/null; then
+    if [[ -z "$CRONICLE_API_KEY" ]]; then
+      CRONICLE_API_KEY="$(config-cli get CRONICLE_API_KEY 2>/dev/null || true)"
+    fi
+    if [[ "$CRONICLE_URL" == "http://localhost:3012" ]]; then
+      local vault_url
+      vault_url="$(config-cli get CRONICLE_URL 2>/dev/null || true)"
+      if [[ -n "$vault_url" ]]; then
+        CRONICLE_URL="$vault_url"
+      fi
+    fi
+    if [[ "$OPENCODE_SERVER_URL" == "http://localhost:4096" ]]; then
+      local vault_oc_url
+      vault_oc_url="$(config-cli get OPENCODE_SERVER_URL 2>/dev/null || true)"
+      if [[ -n "$vault_oc_url" ]]; then
+        OPENCODE_SERVER_URL="$vault_oc_url"
+      fi
+    fi
+    if [[ -z "$OPENCODE_AUTH" ]]; then
+      OPENCODE_AUTH="$(config-cli get OPENCODE_AUTH 2>/dev/null || true)"
+    fi
   fi
   if [[ -z "$CRONICLE_API_KEY" ]]; then
     echo "Error: CRONICLE_API_KEY is not set. Set via env or config-cli vault." >&2
@@ -658,17 +692,24 @@ cmd_health() {
 }
 
 cmd_callback() {
-  local session_id="" schedule_expr="" name="" prompt=""
+  local session_id="" schedule_expr="" name="" prompt="" target_host=""
   local schedule_type="cron" timezone="UTC"
+  local script_cmd="" isolated=false
+  local oc_server_url="" oc_auth=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --session)  session_id="${2:?Error: --session requires a session ID}"; shift 2 ;;
-      --schedule) schedule_expr="${2:?Error: --schedule requires a cron expression}"; shift 2 ;;
-      --name)     name="${2:?Error: --name requires a value}"; shift 2 ;;
-      --prompt)   prompt="${2:?Error: --prompt requires a value}"; shift 2 ;;
-      --type)     schedule_type="${2:?}"; shift 2 ;;
-      --timezone) timezone="${2:?}"; shift 2 ;;
+      --session)    session_id="${2:?Error: --session requires a session ID}"; shift 2 ;;
+      --schedule)   schedule_expr="${2:?Error: --schedule requires a cron expression}"; shift 2 ;;
+      --name)       name="${2:?Error: --name requires a value}"; shift 2 ;;
+      --prompt)     prompt="${2:?Error: --prompt requires a value}"; shift 2 ;;
+      --script)     script_cmd="${2:?Error: --script requires a command}"; shift 2 ;;
+      --isolated)   isolated=true; shift ;;
+      --host)       target_host="${2:?Error: --host requires a hostname}"; shift 2 ;;
+      --type)       schedule_type="${2:?}"; shift 2 ;;
+      --timezone)   timezone="${2:?}"; shift 2 ;;
+      --server-url) oc_server_url="${2:?Error: --server-url requires a URL}"; shift 2 ;;
+      --auth)       oc_auth="${2:?Error: --auth requires user:password}"; shift 2 ;;
       *) echo "Error: Unknown flag '$1'" >&2; return 1 ;;
     esac
   done
@@ -681,42 +722,148 @@ cmd_callback() {
     echo "Error: --schedule is required" >&2
     return 1
   fi
-
-  [[ -z "$name" ]] && name="callback-${session_id}"
-
-  # Build args array
-  local -a args=("run" "-s" "$session_id")
-  if [[ -n "$prompt" ]]; then
-    args+=("-p" "$prompt")
+  if [[ -z "$script_cmd" && -z "$prompt" ]]; then
+    echo "Error: --script or --prompt is required" >&2
+    return 1
   fi
 
-  # Build JobSpec JSON
-  local args_json
-  args_json=$(printf '%s\n' "${args[@]}" | jq -R . | jq -s .)
+  [[ -z "$name" ]] && name="callback-${session_id}"
+  [[ -z "$target_host" ]] && target_host="$(hostname)"
 
-  local jobspec
-  jobspec=$(jq -n \
-    --arg name "$name" \
-    --arg stype "$schedule_type" \
-    --arg sexpr "$schedule_expr" \
-    --arg tz "$timezone" \
-    --argjson args "$args_json" \
+  # Resolve OpenCode server URL and auth (flag > env/vault)
+  [[ -z "$oc_server_url" ]] && oc_server_url="$OPENCODE_SERVER_URL"
+  [[ -z "$oc_auth" ]] && oc_auth="$OPENCODE_AUTH"
+
+  # Resolve opendawg-agent.sh path (still used for isolated mode Phase 1)
+  local agent_script="${OPENDAWG_ROOT}/.opencode/skills/opendawg-agent/scripts/opendawg-agent.sh"
+
+  # --- Build the Phase 2 delivery snippet (inject via HTTP API) ---
+  # Uses curl to POST directly to opencode server's /session/:id/prompt endpoint.
+  # This avoids "opencode run -s" which can fail with:
+  #   "This model does not support assistant message prefill.
+  #    The conversation must end with a user message."
+  # when the session's last message is already an assistant reply.
+  #
+  # curl args:
+  #   -s -f              silent + fail on HTTP error
+  #   -X POST            POST request
+  #   -H "Content-Type"  JSON body
+  #   -u user:pass       Basic Auth (only if OPENCODE_AUTH is set)
+  #   --data-raw         JSON payload with parts array
+  local phase2_snippet
+  phase2_snippet=$(jq -n -r \
+    --arg oc_url "$oc_server_url" \
+    --arg oc_auth "$oc_auth" \
+    '
+    "# Phase 2: Inject result into callback session via opencode HTTP API\n" +
+    "# (direct HTTP avoids opencode run -s prefill issues)\n" +
+    "OPENCODE_URL=" + ($oc_url | @sh) + "\n" +
+    "OPENCODE_AUTH=" + ($oc_auth | @sh) + "\n\n" +
+    "AUTH_ARGS=()\n" +
+    "if [[ -n \"$OPENCODE_AUTH\" ]]; then\n" +
+    "  AUTH_ARGS=(-u \"$OPENCODE_AUTH\")\n" +
+    "fi\n\n" +
+    "echo \"[cron:${JOB_NAME}] Phase 2: Delivering result to session ${CALLBACK_SESSION} via HTTP...\"\n" +
+    "# Pipe JSON payload via stdin to avoid shell quoting issues with special chars\n" +
+    "# Uses /prompt_async (returns 204 No Content) — fire-and-forget, no prefill risk\n" +
+    "HTTP_CODE=$(jq -n --arg text \"$DELIVERY_MSG\" '\''{parts:[{type:\"text\",text:$text}]}'\'' | curl -sf -o /dev/null -w \"%{http_code}\" -X POST -H \"Content-Type: application/json\" \"${AUTH_ARGS[@]+${AUTH_ARGS[@]}}\" --data @- \"${OPENCODE_URL}/session/${CALLBACK_SESSION}/prompt_async\" 2>&1) || {\n" +
+    "  echo \"[cron:${JOB_NAME}] ERROR: Failed to deliver result to session (HTTP ${HTTP_CODE}).\" >&2\n" +
+    "  exit 1\n" +
+    "}\n" +
+    "echo \"[cron:${JOB_NAME}] Result delivered successfully (HTTP ${HTTP_CODE}).\""
+    ')
+
+  # --- Build the two-phase Cronicle shell script using jq (safe escaping) ---
+  # Phase 1: Execute task and collect output
+  # Phase 2: Inject result into callback session via HTTP API (not opencode run -s)
+  local cron_script=""
+
+  if [[ -n "$script_cmd" ]]; then
+    # --- Script mode: run a shell command directly, no agent needed ---
+    cron_script=$(jq -n -r \
+      --arg job_name "$name" \
+      --arg session "$session_id" \
+      --arg cmd "$script_cmd" \
+      --arg phase2 "$phase2_snippet" \
+      '"#!/bin/bash\nset -uo pipefail\nJOB_NAME=" + ($job_name | @sh) +
+       "\nCALLBACK_SESSION=" + ($session | @sh) +
+       "\n\n# Phase 1: Execute script and capture output\nRESULT_FILE=\"$(mktemp)\"\ntrap '\''rm -f \"$RESULT_FILE\"'\'' EXIT\n\necho \"[cron:${JOB_NAME}] Phase 1: Executing task...\"\nif ( " + $cmd + " ) > \"$RESULT_FILE\" 2>&1; then\n  STATUS=\"completed successfully\"\nelse\n  STATUS=\"completed with errors (exit=$?)\"\nfi\nRESULT=\"$(cat \"$RESULT_FILE\")\"\n\n# Build delivery message\nDELIVERY_MSG=\"[Cron Task: ${JOB_NAME}] ${STATUS}\n\nThis is an automated cron task result. Please summarize and present this to the user in a clean format.\n\n--- Raw Output ---\n${RESULT}\n--- End Output ---\"\n\n" + $phase2')
+
+  elif [[ "$isolated" = true ]]; then
+    # --- Isolated agent mode: run prompt in new session, deliver result to callback ---
+    cron_script=$(jq -n -r \
+      --arg job_name "$name" \
+      --arg session "$session_id" \
+      --arg agent "$agent_script" \
+      --arg prompt "$prompt" \
+      --arg phase2 "$phase2_snippet" \
+      '"#!/bin/bash\nset -uo pipefail\nJOB_NAME=" + ($job_name | @sh) +
+       "\nCALLBACK_SESSION=" + ($session | @sh) +
+       "\nAGENT_SCRIPT=" + ($agent | @sh) +
+       "\nPROMPT=" + ($prompt | @sh) +
+       "\n\n# Phase 1: Execute in isolated (new) session and capture output\nRESULT_FILE=\"$(mktemp)\"\ntrap '\''rm -f \"$RESULT_FILE\"'\'' EXIT\n\necho \"[cron:${JOB_NAME}] Phase 1: Running agent in isolated session...\"\nif \"$AGENT_SCRIPT\" \"$PROMPT\" > \"$RESULT_FILE\" 2>&1; then\n  STATUS=\"completed successfully\"\nelse\n  STATUS=\"completed with errors (exit=$?)\"\nfi\nRESULT=\"$(cat \"$RESULT_FILE\")\"\n\n# Build delivery message\nDELIVERY_MSG=\"[Cron Task: ${JOB_NAME}] ${STATUS}\n\nThis is an automated cron task result from an isolated agent session. Please summarize and present this to the user in a clean format.\n\n--- Agent Output ---\n${RESULT}\n--- End Output ---\"\n\n" + $phase2')
+
+  else
+    # --- Direct mode: inject prompt directly into callback session via HTTP API ---
+    cron_script=$(jq -n -r \
+      --arg job_name "$name" \
+      --arg session "$session_id" \
+      --arg prompt "$prompt" \
+      --arg phase2 "$phase2_snippet" \
+      '"#!/bin/bash\nset -uo pipefail\nJOB_NAME=" + ($job_name | @sh) +
+       "\nCALLBACK_SESSION=" + ($session | @sh) +
+       "\n\n# Build delivery message (no phase 1 — prompt is the message)\nDELIVERY_MSG=" + ($prompt | @sh) +
+       "\n\n" + $phase2')
+  fi
+
+  # Build Cronicle event via direct API (bypass jobspec since we have a custom script)
+  local timing
+  case "$schedule_type" in
+    cron)  timing=$(cron_to_timing "$schedule_expr") || return 1 ;;
+    every) timing=$(every_to_timing "$schedule_expr") || return 1 ;;
+    once)  timing=$(once_to_timing "$schedule_expr") || return 1 ;;
+    *)     echo "Error: Unknown schedule type: '$schedule_type'" >&2; return 1 ;;
+  esac
+
+  local event_json
+  event_json=$(jq -n \
+    --arg title "$name" \
+    --arg target "$target_host" \
+    --argjson timing "$timing" \
+    --arg timezone "$timezone" \
+    --arg script "$cron_script" \
     '{
-      name: $name,
-      enabled: true,
-      schedule: {type: $stype, expr: $sexpr, timezone: $tz},
-      target: {},
-      execution: {runner: "opencode", args: $args},
-      policy: {timeout_sec: 3600, retries: 0}
+      title: $title,
+      enabled: 1,
+      category: "general",
+      plugin: "shellplug",
+      target: $target,
+      timing: $timing,
+      timezone: $timezone,
+      timeout: 3600,
+      retries: 0,
+      params: { script: $script, annotate: 0 }
     }')
 
-  echo "Creating opencode callback job:"
+  local mode_desc="direct"
+  [[ -n "$script_cmd" ]] && mode_desc="script → callback"
+  [[ "$isolated" = true ]] && mode_desc="isolated agent → callback"
+
+  echo "Creating callback job:"
   echo "  Session: ${session_id}"
   echo "  Schedule: ${schedule_expr} (${schedule_type})"
+  echo "  Target: ${target_host} (host worker)"
+  echo "  Mode: ${mode_desc}"
+  [[ -n "$script_cmd" ]] && echo "  Script: ${script_cmd}"
   [[ -n "$prompt" ]] && echo "  Prompt: ${prompt}"
   echo ""
 
-  cmd_create "$jobspec"
+  local result
+  result=$(api_call POST "/api/app/create_event/v1" "$event_json") || return 1
+  local event_id
+  event_id=$(echo "$result" | jq -r '.id // "unknown"')
+  echo "Job created successfully. Event ID: ${event_id}"
+  echo "$result" | jq '.'
 }
 
 # ============================================================
