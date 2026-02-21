@@ -8,6 +8,7 @@ CRONICLE_SERVER=""
 CRONICLE_SECRET=""
 WORKER_TAGS=""
 INSTALL_DIR="/opt/cronicle"
+WORKER_PORT="3014"
 CRONICLE_USER="cronicle"
 
 usage() {
@@ -23,6 +24,7 @@ Required:
 Optional:
   --tags <tags>           Comma-separated worker tags (e.g., ops,linux)
   --install-dir <path>    Installation directory (default: /opt/cronicle)
+  --port <number>         Worker HTTP port (default: 3014, avoids conflict with Docker server on 3012)
   --uninstall             Remove Cronicle worker
   --uninstall --purge     Remove worker and all data
 
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --secret)      CRONICLE_SECRET="${2:?Error: --secret requires value}"; shift 2 ;;
     --tags)        WORKER_TAGS="${2:?Error: --tags requires value}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:?Error: --install-dir requires path}"; shift 2 ;;
+    --port)        WORKER_PORT="${2:?Error: --port requires number}"; shift 2 ;;
     --uninstall)   UNINSTALL=true; shift ;;
     --purge)       PURGE=true; shift ;;
     -h|--help)     usage; exit 0 ;;
@@ -166,8 +169,8 @@ cat > "${INSTALL_DIR}/conf/config.json" << CFGEOF
   "socket_io_transports": ["websocket"],
 
   "WebServer": {
-    "http_port": 3012,
-    "https_port": 3013,
+    "http_port": ${WORKER_PORT},
+    "https_port": $(( WORKER_PORT + 1 )),
     "http_htdocs_dir": "htdocs",
     "http_max_upload_size": 104857600,
     "http_temp_dir": "/tmp",

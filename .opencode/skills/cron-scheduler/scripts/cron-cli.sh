@@ -3,7 +3,7 @@
 # All agent commands plus: start, stop, status, install-cmd, clear.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OPENDAWG_ROOT="${OPENDAWG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 export PATH="${OPENDAWG_ROOT}/.opendawg/bin:${PATH}"
@@ -13,13 +13,15 @@ CRONICLE_URL="${CRONICLE_URL:-http://localhost:3012}"
 CRONICLE_API_KEY="${CRONICLE_API_KEY:-}"
 CRONICLE_PORT="${CRONICLE_PORT:-3012}"
 
+CRONICLE_INSTALL_DIR="${CRONICLE_INSTALL_DIR:-/opt/cronicle}"
+
 usage() {
   cat <<'EOF'
 Usage: cron-cli <command> [args]
 
 Admin:
-  start                               Start Cronicle server (Docker)
-  stop                                Stop Cronicle server
+  start                               Start Cronicle master (host-native, systemd)
+  stop                                Stop Cronicle master
   status                              Show server and service status
   install-cmd [--server-url <url>] [--tags <tags>]
                                       Generate worker install command
@@ -44,101 +46,167 @@ System:
   health                              Server health check
 
 Convenience:
-  callback --session <id> --schedule <cron> [--name <name>] [--prompt <text>]
-                                      Create opencode callback job
+  callback --session <id> --schedule <cron> [--name <name>] [--prompt <text>] [--host <hostname>]
+                                       Create agent callback job (runs on host worker)
 EOF
 }
 
 inject_secrets() {
-  if [[ -z "$CRONICLE_API_KEY" ]] && command -v config-cli &>/dev/null; then
-    CRONICLE_API_KEY="$(config-cli get CRONICLE_API_KEY 2>/dev/null || true)"
-  fi
-}
-
-# --- Docker Compose file detection ---
-detect_compose_file() {
-  if [[ -f "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
-    echo "${OPENDAWG_ROOT}/docker-compose.yml"
-  else
-    echo "${SKILL_DIR}/docker/docker-compose.yml"
+  if command -v config-cli &>/dev/null; then
+    if [[ -z "$CRONICLE_API_KEY" ]]; then
+      CRONICLE_API_KEY="$(config-cli get CRONICLE_API_KEY 2>/dev/null || true)"
+    fi
+    if [[ "$CRONICLE_URL" == "http://localhost:3012" ]]; then
+      local vault_url
+      vault_url="$(config-cli get CRONICLE_URL 2>/dev/null || true)"
+      if [[ -n "$vault_url" ]]; then
+        CRONICLE_URL="$vault_url"
+      fi
+    fi
   fi
 }
 
 # --- Admin Commands ---
 
-cmd_start() {
-  local compose_file
-  compose_file=$(detect_compose_file)
+# Check if Cronicle is installed on host
+is_installed() {
+  [[ -f "${CRONICLE_INSTALL_DIR}/bin/control.sh" ]]
+}
 
-  echo "[cron-cli] Starting Cronicle..."
+cmd_start() {
+  echo "[cron-cli] Starting Cronicle master..."
 
   # Inject secrets from vault if available
-  if command -v config-cli &>/dev/null; then
-    local vault_output
-    vault_output="$(config-cli get-all 2>/dev/null || echo "")"
-    if [[ -n "$vault_output" ]]; then
-      eval "$vault_output"
-      echo "[cron-cli] Injected secrets from vault"
-    fi
+  inject_secrets
+
+  # Install Cronicle if not present
+  if ! is_installed; then
+    echo "[cron-cli] Cronicle not found at ${CRONICLE_INSTALL_DIR}. Installing..."
+    local secret="${CRONICLE_SECRET:-$(openssl rand -hex 16)}"
+    sudo bash "${SCRIPT_DIR}/install-worker.sh" \
+      --server "http://localhost:${CRONICLE_PORT}" \
+      --secret "$secret" \
+      --install-dir "$CRONICLE_INSTALL_DIR"
+    # Run setup to make this node the master
+    sudo "${CRONICLE_INSTALL_DIR}/bin/control.sh" setup 2>/dev/null || true
+    CRONICLE_SECRET="$secret"
   fi
 
   # Generate API key if not set
   if [[ -z "${CRONICLE_API_KEY:-}" ]]; then
     CRONICLE_API_KEY="$(openssl rand -hex 16)"
-    echo "[cron-cli] Generated API key: ${CRONICLE_API_KEY}"
-    echo "[cron-cli] Store it: config-cli set CRONICLE_API_KEY ${CRONICLE_API_KEY}"
+    echo "[cron-cli] Generated new API key: ${CRONICLE_API_KEY}"
   fi
 
-  export CRONICLE_API_KEY CRONICLE_PORT CRONICLE_URL
-
-  if [[ "$compose_file" == "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
-    docker compose -f "$compose_file" --profile cron up -d
+  # Ensure systemd service exists and start
+  if command -v systemctl &>/dev/null; then
+    if ! systemctl is-active cronicle &>/dev/null; then
+      sudo systemctl start cronicle
+    fi
+    echo "[cron-cli] Cronicle service started."
   else
-    docker compose -f "$compose_file" up -d
+    sudo "${CRONICLE_INSTALL_DIR}/bin/control.sh" start
   fi
 
-  # Wait for health
-  echo "[cron-cli] Waiting for Cronicle to be ready..."
-  local attempts=0 max_attempts=30
+  # Wait for master election + health (can take up to 60s on first start)
+  echo "[cron-cli] Waiting for Cronicle to become master (up to 90s)..."
+  local attempts=0 max_attempts=45
   while ((attempts < max_attempts)); do
-    if curl -sf "http://localhost:${CRONICLE_PORT}/api/app/get_schedule/v1?limit=1" \
-       -H "X-API-Key: ${CRONICLE_API_KEY}" &>/dev/null; then
+    local resp
+    resp=$(curl -sf "http://localhost:${CRONICLE_PORT}/api/app/get_activity?offset=0&limit=1&api_key=${CRONICLE_API_KEY}" 2>/dev/null || echo "")
+    local code
+    code=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))" 2>/dev/null || echo "")
+    if [[ "$code" == "0" ]]; then
       echo "[cron-cli] Cronicle is ready at http://localhost:${CRONICLE_PORT}"
       echo "[cron-cli] Web UI: http://localhost:${CRONICLE_PORT}"
-      echo "[cron-cli] API Key: ${CRONICLE_API_KEY}"
+
+      # Write server config to vault for agent/client discovery
+      if command -v config-cli &>/dev/null; then
+        config-cli set CRONICLE_URL "http://localhost:${CRONICLE_PORT}" 2>/dev/null || true
+        config-cli set CRONICLE_API_KEY "$CRONICLE_API_KEY" 2>/dev/null || true
+        local secret
+        secret=$(sudo python3 -c "import json; print(json.load(open('${CRONICLE_INSTALL_DIR}/conf/config.json'))['secret_key'])" 2>/dev/null || echo "")
+        if [[ -n "$secret" ]]; then
+          config-cli set CRONICLE_SECRET "$secret" 2>/dev/null || true
+        fi
+        echo "[cron-cli] Server config written to vault (CRONICLE_URL, CRONICLE_API_KEY, CRONICLE_SECRET)"
+      fi
       return 0
+    fi
+
+    # If server responds but API key is not recognized (code "api"), try creating it
+    if [[ "$code" == "" ]]; then
+      local resp2
+      resp2=$(curl -sf "http://localhost:${CRONICLE_PORT}/api/app/get_activity?offset=0&limit=1" 2>/dev/null || echo "")
+      local code2
+      code2=$(echo "$resp2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))" 2>/dev/null || echo "")
+      if [[ "$code2" == "session" || "$code2" == "api" ]]; then
+        # Server is master, create API key
+        echo "[cron-cli] Creating API key..."
+        _create_api_key_if_needed
+        continue
+      fi
     fi
     ((attempts++))
     sleep 2
   done
 
-  echo "[cron-cli] WARNING: Cronicle did not become healthy within 60s."
-  echo "[cron-cli] Check logs: docker compose -f ${compose_file} logs cronicle"
+  echo "[cron-cli] WARNING: Cronicle did not become ready within 90s."
+  echo "[cron-cli] Check logs: sudo journalctl -u cronicle --no-pager -n 20"
   return 1
 }
 
-cmd_stop() {
-  local compose_file
-  compose_file=$(detect_compose_file)
+# Helper: create API key via admin login
+_create_api_key_if_needed() {
+  local login_resp session_id
+  login_resp=$(curl -sf -X POST "http://localhost:${CRONICLE_PORT}/api/user/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"'"${CRONICLE_ADMIN_PASSWORD:-admin}"'"}' 2>/dev/null || echo "")
+  session_id=$(echo "$login_resp" | grep -oP '"session_id":"[^"]+' | cut -d'"' -f4)
+  if [[ -z "$session_id" ]]; then
+    return 1
+  fi
+  curl -sf -X POST "http://localhost:${CRONICLE_PORT}/api/app/create_api_key/v1" \
+    -H "Content-Type: application/json" \
+    -d "{\"session_id\":\"${session_id}\",\"key\":\"${CRONICLE_API_KEY}\",\"title\":\"Admin API Key\",\"active\":1,\"privileges\":{\"admin\":1,\"create_events\":1,\"edit_events\":1,\"delete_events\":1,\"run_events\":1,\"abort_events\":1,\"state_update\":1}}" &>/dev/null || true
+}
 
+cmd_stop() {
   echo "[cron-cli] Stopping Cronicle..."
-  if [[ "$compose_file" == "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
-    docker compose -f "$compose_file" --profile cron down
+  if command -v systemctl &>/dev/null && systemctl is-active cronicle &>/dev/null; then
+    sudo systemctl stop cronicle
+  elif is_installed; then
+    sudo "${CRONICLE_INSTALL_DIR}/bin/control.sh" stop
   else
-    docker compose -f "$compose_file" down
+    echo "[cron-cli] Cronicle is not installed."
+    return 1
   fi
   echo "[cron-cli] Cronicle stopped."
 }
 
 cmd_status() {
-  local compose_file
-  compose_file=$(detect_compose_file)
-
-  echo "=== Docker Services ==="
-  if [[ "$compose_file" == "${OPENDAWG_ROOT}/docker-compose.yml" ]]; then
-    docker compose -f "$compose_file" --profile cron ps 2>/dev/null || echo "  (not running)"
+  echo "=== Cronicle Service ==="
+  if command -v systemctl &>/dev/null; then
+    if systemctl is-active cronicle &>/dev/null; then
+      echo "  Service: RUNNING"
+      echo "  Install: ${CRONICLE_INSTALL_DIR}"
+    else
+      echo "  Service: STOPPED"
+    fi
+  elif is_installed; then
+    if [[ -f "${CRONICLE_INSTALL_DIR}/logs/cronicled.pid" ]]; then
+      local pid
+      pid=$(cat "${CRONICLE_INSTALL_DIR}/logs/cronicled.pid" 2>/dev/null || echo "")
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        echo "  Service: RUNNING (PID $pid)"
+      else
+        echo "  Service: STOPPED"
+      fi
+    else
+      echo "  Service: STOPPED"
+    fi
   else
-    docker compose -f "$compose_file" ps 2>/dev/null || echo "  (not running)"
+    echo "  Service: NOT INSTALLED"
   fi
   echo ""
 
@@ -147,13 +215,16 @@ cmd_status() {
   echo "=== Cronicle Health ==="
   if [[ -n "$CRONICLE_API_KEY" ]]; then
     local result
-    if result=$(curl -sf "${CRONICLE_URL}/api/app/get_schedule/v1?limit=1" \
-       -H "X-API-Key: ${CRONICLE_API_KEY}" 2>/dev/null); then
-      echo "  Status: HEALTHY"
-      echo "  URL: ${CRONICLE_URL}"
-      local job_count
-      job_count=$(echo "$result" | jq -r '.list.length // 0')
-      echo "  Jobs: ${job_count}"
+    if result=$(curl -sf "${CRONICLE_URL}/api/app/get_activity?offset=0&limit=1&api_key=${CRONICLE_API_KEY}" 2>/dev/null); then
+      local code
+      code=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code','error'))" 2>/dev/null || echo "error")
+      if [[ "$code" == "0" ]]; then
+        echo "  Status: HEALTHY"
+        echo "  URL: ${CRONICLE_URL}"
+      else
+        echo "  Status: NOT MASTER (code: $code)"
+        echo "  URL: ${CRONICLE_URL}"
+      fi
     else
       echo "  Status: UNREACHABLE"
       echo "  URL: ${CRONICLE_URL}"
@@ -176,14 +247,11 @@ cmd_install_cmd() {
 
   inject_secrets
 
-  echo "# Run this on the worker machine to install Cronicle worker:"
-  echo "curl -sL ${server_url}/install-worker.sh | bash -s -- \\"
-  echo "  --server ${server_url} \\"
-  echo "  --secret \"\$(config-cli get CRONICLE_SECRET)\" \\"
-  echo "  --tags ${tags}"
+  echo "# On a machine with cron-client installed (preferred):"
+  echo "cron-client install --server-url ${server_url} --secret \"\$(config-cli get CRONICLE_SECRET)\""
   echo ""
-  echo "# Or manually:"
-  echo "bash ${SKILL_DIR}/scripts/install-worker.sh \\"
+  echo "# Or manually with install-worker.sh:"
+  echo "sudo bash ${SCRIPT_DIR}/install-worker.sh \\"
   echo "  --server ${server_url} \\"
   echo "  --secret <cronicle_secret_key> \\"
   echo "  --tags ${tags}"
