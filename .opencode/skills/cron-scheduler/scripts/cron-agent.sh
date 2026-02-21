@@ -280,8 +280,16 @@ every_to_timing() {
       echo "{\"hours\":[${hrs[*]}],\"minutes\":[0]}"
       ;;
     d)
-      # Every N days — run at midnight. For N>1, we approximate with day-of-month.
-      echo "{\"hours\":[0],\"minutes\":[0]}"
+      # Every N days — approximate with day-of-month anchored at day 1.
+      # e.g. every 2d → days [1,3,5,...,31], every 7d → days [1,8,15,22,29]
+      if ((val < 1 || val > 30)); then
+        echo "Error: Day interval must be 1-30" >&2
+        return 1
+      fi
+      local -a days=()
+      for ((i=1; i<=31; i+=val)); do days+=("$i"); done
+      local IFS=','
+      echo "{\"days\":[${days[*]}],\"hours\":[0],\"minutes\":[0]}"
       ;;
   esac
 }

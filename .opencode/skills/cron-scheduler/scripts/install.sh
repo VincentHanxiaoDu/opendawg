@@ -10,16 +10,6 @@ echo "=== cron-scheduler installer ==="
 # Check prerequisites
 errors=0
 
-if ! command -v docker &>/dev/null; then
-  echo "ERROR: 'docker' is required but not found. Install Docker Desktop." >&2
-  errors=1
-fi
-
-if ! docker compose version &>/dev/null 2>&1; then
-  echo "ERROR: 'docker compose' plugin is required. Install Docker Compose V2." >&2
-  errors=1
-fi
-
 if ! command -v curl &>/dev/null; then
   echo "ERROR: 'curl' is required but not found." >&2
   errors=1
