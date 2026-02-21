@@ -157,8 +157,9 @@ export async function finalizeTextMessage(sessionId: string, ctx?: Context): Pro
         try {
             await resolvedCtx.api.editMessageText(chatId, msgId, finalHtml, { parse_mode: "HTML" });
         } catch {
-            try { await resolvedCtx.api.deleteMessage(chatId, msgId); } catch {}
+            // Edit failed — send new message first, then delete old one async to prevent gap/duplicate
             try { await resolvedCtx.reply(finalHtml, { parse_mode: "HTML" }); } catch {}
+            resolvedCtx.api.deleteMessage(chatId, msgId).catch(() => {});
         }
     } else {
         try { await resolvedCtx.reply(finalHtml, { parse_mode: "HTML" }); } catch {}
