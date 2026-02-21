@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ms365-teams-monitor.sh
-# Fetches Teams chats + channel messages from the past 30 minutes,
-# filters for messages relevant to Hanxiao Du, delivers to opencode session.
-# Concurrent requests via background jobs + wait.
+# Fetches Teams chats + channel messages from the past 30 minutes.
+# Phase 3: uses opencode agent (isolated session) to soft-filter and summarize.
+# Only delivers if agent decides there's something worth notifying.
 set -uo pipefail
 
-MS365_TOKEN_CACHE="${HOME}/.config/ms365-mcp/.token-cache.json"
-MS365_ACCOUNT="${HOME}/.config/ms365-mcp/.selected-account.json"
+MS365_TOKEN_CACHE="/home/hxd/.config/ms365-mcp/.token-cache.json"
+MS365_ACCOUNT="/home/hxd/.config/ms365-mcp/.selected-account.json"
 ME="Hanxiao.Du@astratech.ae"
-ME_NAME="Hanxiao"
+ME_DISPLAY="Hanxiao Du"
 WINDOW_MINUTES="${WINDOW_MINUTES:-30}"
 
 TMPDIR_LOCAL="$(mktemp -d)"
@@ -24,19 +24,9 @@ MS365_MCP_SELECTED_ACCOUNT_PATH="$MS365_ACCOUNT" \
 }
 
 # --- Extract access token from MSAL cache ---
-TOKEN=$(python3 - <<'PYEOF'
-import json, sys, os
-path = os.path.expandvars("${HOME}/.config/ms365-mcp/.token-cache.json")
-path = os.path.expanduser(path)
-data = json.load(open(path))
-for entry in data.get("AccessToken", {}).values():
-    print(entry["secret"])
-    break
-PYEOF
-)
 TOKEN=$(python3 -c "
-import json, os
-data = json.load(open(os.path.expanduser('$MS365_TOKEN_CACHE')))
+import json
+data = json.load(open('$MS365_TOKEN_CACHE'))
 for entry in data.get('AccessToken', {}).values():
     print(entry['secret'])
     break
@@ -117,17 +107,16 @@ wait
 echo "[teams-monitor] Phase 2 complete."
 
 # ============================================================
-# Phase 3: Filter relevant messages and format output
+# Phase 3: Collect all raw messages into a single text dump
 # ============================================================
-RESULT=$(python3 - <<PYEOF
+RAW_MESSAGES=$(python3 - <<PYEOF
 import json, glob, re, os
 
 me = "$ME"
-me_name = "$ME_NAME"
 tmpdir = "$TMPDIR_LOCAL"
 results = []
 
-for fpath in glob.glob(os.path.join(tmpdir, "*.json")):
+for fpath in sorted(glob.glob(os.path.join(tmpdir, "*.json"))):
     try:
         data = json.load(open(fpath))
     except Exception:
@@ -135,8 +124,6 @@ for fpath in glob.glob(os.path.join(tmpdir, "*.json")):
     for msg in data.get("value", []):
         body_obj = msg.get("body") or {}
         body = body_obj.get("content") or ""
-        if not body.strip():
-            continue
         clean_body = re.sub(r"<[^>]+>", "", body).strip()
         if not clean_body or clean_body in ("null",):
             continue
@@ -151,22 +138,17 @@ for fpath in glob.glob(os.path.join(tmpdir, "*.json")):
         if me.lower() in sender_email.lower():
             continue
 
-        mentions_upns = [
-            (m.get("mentioned") or {}).get("user", {}).get("userPrincipalName", "").lower()
+        mentions = [
+            (m.get("mentioned") or {}).get("user", {}).get("displayName", "")
             for m in msg.get("mentions") or []
         ]
-        relevant = (
-            me.lower() in mentions_upns
-            or me_name.lower() in clean_body.lower()
-        )
-        if not relevant:
-            continue
-
         ch_info = msg.get("channelIdentity") or {}
-        ctx = msg.get("chatId") or "team-channel"
+        ctx = msg.get("chatId") or f"team-channel"
         ts = (msg.get("createdDateTime") or "")[:16]
-        preview = clean_body[:300].replace("\n", " ")
-        results.append(f"[{ts}] {sender_name}: {preview}  (src:{ctx[:50]})")
+        preview = clean_body[:500].replace("\n", " ")
+        mention_str = f" [@{', @'.join(m for m in mentions if m)}]" if mentions else ""
+
+        results.append(f"[{ts}] {sender_name}{mention_str}: {preview}  (src:{ctx[:60]})")
 
 if results:
     print("\n".join(results))
@@ -175,11 +157,43 @@ else:
 PYEOF
 )
 
-if [[ "$RESULT" == "__NONE__" ]]; then
-  echo "[teams-monitor] No relevant messages in the past ${WINDOW_MINUTES} minutes. Skipping delivery."
+if [[ "$RAW_MESSAGES" == "__NONE__" ]]; then
+  echo "[teams-monitor] No messages in the past ${WINDOW_MINUTES} minutes. Done."
   exit 0
 fi
 
-echo "[teams-monitor] Found relevant messages, delivering to session..."
-echo "=== Teams 相关消息 (过去${WINDOW_MINUTES}分钟) ==="
-echo "$RESULT"
+echo "[teams-monitor] Phase 3: asking agent to filter and summarize..."
+
+# ============================================================
+# Phase 4: opencode agent soft-filter (isolated session)
+# ============================================================
+AGENT_PROMPT="You are a smart notification filter for $ME_DISPLAY ($ME).
+
+Below are Teams messages from the past ${WINDOW_MINUTES} minutes. Your job:
+1. Decide if any messages are worth notifying the user about.
+2. A message is worth notifying if it: directly mentions or addresses the user, requires a response or action, contains information the user would likely want to know about (decisions, blockers, questions to them, important updates in their projects).
+3. Routine automated messages, bot notifications, unrelated chatter, or messages with no actionable relevance should be IGNORED.
+4. If NOTHING is worth notifying, output exactly: __NONE__
+5. If there ARE relevant messages, output a clean concise summary in Chinese, grouping by topic/chat, highlighting what needs attention. Do NOT output __NONE__ if there are relevant messages.
+
+--- Teams Messages ---
+${RAW_MESSAGES}
+--- End ---"
+
+AGENT_RESULT=$(opencode run "$AGENT_PROMPT" 2>/dev/null || echo "__AGENT_ERROR__")
+
+if [[ "$AGENT_RESULT" == "__NONE__" ]] || [[ -z "$AGENT_RESULT" ]]; then
+  echo "[teams-monitor] Agent decided: nothing worth notifying. Done."
+  exit 0
+fi
+
+if [[ "$AGENT_RESULT" == "__AGENT_ERROR__" ]]; then
+  echo "[teams-monitor] WARNING: agent filter failed, delivering raw messages as fallback."
+  echo "=== Teams 消息 (过去${WINDOW_MINUTES}分钟，原始) ==="
+  echo "$RAW_MESSAGES"
+  exit 0
+fi
+
+echo "[teams-monitor] Agent found relevant messages, delivering..."
+echo "=== Teams 消息通知 ==="
+echo "$AGENT_RESULT"
