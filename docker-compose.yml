@@ -10,6 +10,9 @@ services:
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-graphiti}
+      - NEO4J_server_memory_heap_initial__size=128m
+      - NEO4J_server_memory_heap_max__size=256m
+      - NEO4J_server_memory_pagecache_size=64m
     volumes:
       - neo4j_data:/data
     profiles:
@@ -20,6 +23,10 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     restart: on-failure
 
   graphiti:
@@ -53,6 +60,10 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     restart: on-failure
 
   # ============================================================
@@ -78,35 +89,45 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
     restart: on-failure
 
   # ============================================================
-  # Cron Scheduler — Cronicle (distributed cron for AI agents)
-  #   Activated by: --cron or --start-all
+  # Cron Scheduler — Cronicle
+  #   DEPRECATED: Cronicle now runs as a host-native systemd service
+  #   instead of Docker. Use 'cron-cli start' to manage.
+  #   The Docker service definition is kept for reference only.
   # ============================================================
-  cronicle:
-    build:
-      context: .opencode/skills/cron-scheduler/docker
-      dockerfile: Dockerfile
-    ports:
-      - "${CRONICLE_PORT:-3012}:3012"
-    environment:
-      - CRONICLE_API_KEY=${CRONICLE_API_KEY:-}
-      - CRONICLE_SECRET=${CRONICLE_SECRET:-}
-      - CRONICLE_BASE_URL=${CRONICLE_BASE_URL:-http://localhost:3012}
-      - CRONICLE_ADMIN_PASSWORD=${CRONICLE_ADMIN_PASSWORD:-admin}
-    volumes:
-      - cronicle_data:/opt/cronicle/data
-      - cronicle_logs:/opt/cronicle/logs
-    profiles:
-      - cron
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3012/"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 60s
-    restart: on-failure
+  # cronicle:
+  #   build:
+  #     context: .opencode/skills/cron-scheduler/docker
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "${CRONICLE_PORT:-3012}:3012"
+  #   environment:
+  #     - CRONICLE_API_KEY=${CRONICLE_API_KEY:-}
+  #     - CRONICLE_SECRET=${CRONICLE_SECRET:-}
+  #     - CRONICLE_BASE_URL=${CRONICLE_BASE_URL:-http://localhost:3012}
+  #     - CRONICLE_ADMIN_PASSWORD=${CRONICLE_ADMIN_PASSWORD:-admin}
+  #   volumes:
+  #     - cronicle_data:/opt/cronicle/data
+  #     - cronicle_logs:/opt/cronicle/logs
+  #   profiles:
+  #     - cron
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-sf", "http://localhost:3012/"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 12
+  #     start_period: 60s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 128M
+  #   restart: on-failure
 
   # ============================================================
   # Channel — Telegram (opencode-telegram, pure client)
@@ -147,6 +168,10 @@ services:
       - ${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/telegram:${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/telegram
     profiles:
       - telegram
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     restart: on-failure
 
   # ============================================================
@@ -175,6 +200,10 @@ services:
       - ${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/discord:${OPENDAWG_MEDIA_DIR:-${HOME}/opendawg/media}/discord
     profiles:
       - discord
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     restart: on-failure
 
 volumes:
@@ -182,5 +211,5 @@ volumes:
   config_vault:
   channel_data:
   channel_discord_data:
-  cronicle_data:
-  cronicle_logs:
+  # cronicle_data:    # Deprecated: Cronicle runs on host now
+  # cronicle_logs:    # Deprecated: Cronicle runs on host now
