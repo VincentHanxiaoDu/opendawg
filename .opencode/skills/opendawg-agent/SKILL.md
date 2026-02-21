@@ -205,6 +205,15 @@ All unrecognized flags pass through to opencode.
 | `NEO4J_PASSWORD` | config-cli vault | Optional, for Neo4j |
 | `GRAPHITI_GROUP_ID` | `--graphiti-group-id` or default | Default: opendawg |
 
+## Cron Scheduling Integration
+
+`setup.sh` includes a Step 6 that auto-installs a Cronicle worker if `CRONICLE_URL` and `CRONICLE_SECRET` are present in the config-cli vault. This gives spawned agents automatic cron scheduling capability via the `cron-scheduler` skill — no manual worker setup required.
+
+- The worker registers with the Cronicle server and can receive scheduled jobs
+- Uses `cron-client install` under the hood (from the cron-scheduler skill)
+- Skipped silently if vault lacks `CRONICLE_URL` or `CRONICLE_SECRET`
+- Idempotent: safe to run multiple times
+
 ## Prerequisites
 
 - **git** — for cloning the skills repo

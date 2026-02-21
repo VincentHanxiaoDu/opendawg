@@ -141,4 +141,28 @@ else
 fi
 
 echo "[setup] opencode $(opencode --version 2>/dev/null || echo '?') — ready"
+
+# --- Step 6: Install cron worker (if server config exists in vault) ---
+if [[ "$SKIP_CONFIG_CLI" = false ]] && command -v config-cli &>/dev/null; then
+  CRON_URL="$(config-cli get CRONICLE_URL 2>/dev/null || true)"
+  CRON_SECRET="$(config-cli get CRONICLE_SECRET 2>/dev/null || true)"
+
+  if [[ -n "$CRON_URL" && -n "$CRON_SECRET" ]]; then
+    CRON_CLIENT_SCRIPT="$SKILLS_ROOT/cron-scheduler/scripts/cron-client.sh"
+    if [[ -f "$CRON_CLIENT_SCRIPT" ]]; then
+      # Install cron-scheduler skill first (ensures cron-client is on PATH)
+      CRON_INSTALL="$SKILLS_ROOT/cron-scheduler/scripts/install.sh"
+      if [[ -f "$CRON_INSTALL" ]]; then
+        bash "$CRON_INSTALL" 2>/dev/null || true
+      fi
+      echo "[setup] Cron server found in vault (${CRON_URL}). Installing worker..."
+      bash "$CRON_CLIENT_SCRIPT" install --server-url "$CRON_URL" --secret "$CRON_SECRET" 2>/dev/null \
+        && echo "[setup] Cron worker installed and connected." \
+        || echo "[setup] Warning: Cron worker installation failed (non-fatal)."
+    fi
+  else
+    echo "[setup] Skipping cron worker — no CRONICLE_URL/CRONICLE_SECRET in vault"
+  fi
+fi
+
 echo "[setup] Setup complete. Use opendawg-agent.sh to run tasks."
