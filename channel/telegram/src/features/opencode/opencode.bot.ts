@@ -15,6 +15,8 @@ import {
     setPendingJump, consumePendingJump,
     totalPages, getPageSlice, PAGE_SIZE,
 } from "../../utils/pagination.js";
+import { createVoiceProvider, splitForTts, type VoiceProvider } from "../../services/voice.service.js";
+import { setVoiceProvider as setIdleVoiceProvider } from "./event-handlers/session.idle.handler.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -53,6 +55,7 @@ export class OpenCodeBot {
     private serverRegistry: ServerRegistry;
     private fileMentionService: FileMentionService;
     private fileMentionUI: FileMentionUI;
+    private voiceProvider: VoiceProvider | null = null;
 
     constructor(
         opencodeService: OpenCodeService,
@@ -67,6 +70,24 @@ export class OpenCodeBot {
 
         // Pass messageDeleteTimeout to service layer for background notifications
         setMessageDeleteTimeout(configService.getMessageDeleteTimeout());
+
+        // Initialize voice provider if voice features are enabled
+        if (configService.isVoiceEnabled()) {
+            try {
+                this.voiceProvider = createVoiceProvider({
+                    provider: configService.getVoiceProvider(),
+                    openaiApiKey: process.env.OPENAI_API_KEY,
+                    sttModel: configService.getVoiceSttModel(),
+                    ttsModel: configService.getVoiceTtsModel(),
+                    ttsVoice: configService.getVoiceTtsVoice(),
+                });
+                // Register with session.idle handler for TTS delivery
+                setIdleVoiceProvider(this.voiceProvider);
+                console.log(`[Voice] Provider initialized: ${configService.getVoiceProvider()}`);
+            } catch (err) {
+                console.warn(`[Voice] Failed to initialize voice provider: ${err instanceof Error ? err.message : err}`);
+            }
+        }
     }
 
     registerHandlers(bot: Bot): void {
@@ -88,6 +109,7 @@ export class OpenCodeBot {
         bot.command("server", AccessControlMiddleware.requireAccess, this.handleServer.bind(this));
         bot.command("status", AccessControlMiddleware.requireAccess, this.handleStatus.bind(this));
         bot.command("model", AccessControlMiddleware.requireAccess, this.handleModel.bind(this));
+        bot.command("tts", AccessControlMiddleware.requireAccess, this.handleTts.bind(this));
 
         // Handle keyboard button presses
         bot.hears("⏹️ ESC", AccessControlMiddleware.requireAccess, this.handleEsc.bind(this));
@@ -1580,6 +1602,47 @@ export class OpenCodeBot {
     }
 
     // ─────────────────────────────────────────────
+    // TTS toggle command
+    // ─────────────────────────────────────────────
+
+    private async handleTts(ctx: Context): Promise<void> {
+        const userId = ctx.from?.id;
+        if (!userId) return;
+
+        if (!this.voiceProvider) {
+            await ctx.reply(
+                "❌ Voice features are not available.\n\nPlease set <code>OPENAI_API_KEY</code> in your environment to enable TTS/STT.",
+                { parse_mode: "HTML" }
+            );
+            return;
+        }
+
+        const userSession = this.opencodeService.getUserSession(userId);
+        if (!userSession) {
+            await ctx.reply("❌ No active session. Use /opencode to start one.");
+            return;
+        }
+
+        const arg = ctx.match?.toString().trim().toLowerCase();
+        if (arg === "on") {
+            userSession.ttsEnabled = true;
+        } else if (arg === "off") {
+            userSession.ttsEnabled = false;
+        } else {
+            // Toggle
+            userSession.ttsEnabled = !userSession.ttsEnabled;
+        }
+
+        const status = userSession.ttsEnabled ? "✅ TTS <b>enabled</b>" : "🔇 TTS <b>disabled</b>";
+        const hint = userSession.ttsEnabled
+            ? "\n\nAI replies will be sent as voice messages."
+            : "\n\nAI replies will be sent as text.";
+
+        const m = await ctx.reply(`${status}${hint}`, { parse_mode: "HTML" });
+        await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+    }
+
+    // ─────────────────────────────────────────────
     // File upload
     // ─────────────────────────────────────────────
 
@@ -1591,6 +1654,8 @@ export class OpenCodeBot {
             let fileId: string | undefined;
             let fileName: string | undefined;
             let fileType = "file";
+            let isAudioType = false;
+            let audioMimeType = "audio/ogg";
 
             if (message.document) {
                 fileId = message.document.file_id;
@@ -1609,10 +1674,14 @@ export class OpenCodeBot {
                 fileId = message.audio.file_id;
                 fileName = message.audio.file_name || `audio_${Date.now()}.mp3`;
                 fileType = "audio";
+                isAudioType = true;
+                audioMimeType = message.audio.mime_type || "audio/mpeg";
             } else if (message.voice) {
                 fileId = message.voice.file_id;
                 fileName = `voice_${Date.now()}.ogg`;
                 fileType = "voice";
+                isAudioType = true;
+                audioMimeType = "audio/ogg";
             } else if (message.video_note) {
                 fileId = message.video_note.file_id;
                 fileName = `video_note_${Date.now()}.mp4`;
@@ -1631,11 +1700,55 @@ export class OpenCodeBot {
             const response = await fetch(fileUrl);
             if (!response.ok) { await ctx.reply("❌ Failed to download file from Telegram"); return; }
 
+            const buffer = Buffer.from(await response.arrayBuffer());
+
+            // ── STT path: transcribe voice/audio if voice provider is available ──
+            if (isAudioType && this.voiceProvider) {
+                const userId = ctx.from?.id;
+                if (!userId) return;
+
+                await ctx.replyWithChatAction("typing");
+                try {
+                    const transcript = await this.voiceProvider.transcribe(buffer, { mimeType: audioMimeType });
+
+                    if (!transcript.trim()) {
+                        const m = await ctx.reply("🔇 Could not transcribe audio — please try again or send text.");
+                        await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                        return;
+                    }
+
+                    console.log(`✓ STT transcribed: "${transcript.slice(0, 80)}..." (${fileType}, ${buffer.length} bytes)`);
+
+                    if (this.opencodeService.hasActiveSession(userId)) {
+                        const caption = message.caption?.trim();
+                        const promptText = caption
+                            ? `${transcript}\n\n${caption}`
+                            : transcript;
+                        await this.sendPromptToOpenCode(ctx, userId, promptText);
+                    } else {
+                        // No active session — show transcript so user can use it
+                        const m = await ctx.reply(
+                            `🎙 <b>Transcript:</b>\n\n${escapeHtml(transcript)}\n\n<i>No active session. Use /opencode to start one, then send your voice message.</i>`,
+                            { parse_mode: "HTML" }
+                        );
+                        await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout() * 3);
+                    }
+                } catch (err) {
+                    console.error("STT transcription error:", err);
+                    const m = await ctx.reply(
+                        `❌ <b>Transcription failed:</b> ${escapeHtml(err instanceof Error ? err.message : String(err))}`,
+                        { parse_mode: "HTML" }
+                    );
+                    await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                }
+                return;
+            }
+
+            // ── Non-audio path: save to disk and forward file path ──
             const saveDir = this.configService.getMediaTmpLocation();
             if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
 
             const savePath = path.join(saveDir, fileName);
-            const buffer = Buffer.from(await response.arrayBuffer());
             fs.writeFileSync(savePath, buffer);
 
             const confirmMessage = await ctx.reply(

@@ -23,12 +23,13 @@ async function build() {
       sourcemap: !isProd,
       minify: isProd,
       treeShaking: true,
-      external: [
+        external: [
         "node:*", "http", "https", "fs", "path", "os", "crypto", "stream",
         "util", "events", "buffer", "child_process", "url", "readline",
         "net", "tls", "zlib",
         "better-sqlite3", "nanoid",
         "discord.js", "@discordjs/rest", "@discordjs/ws",
+        "@discordjs/voice", "@discordjs/opus", "opusscript", "prism-media",
         "dotenv",
       ],
       banner: { js: "" },

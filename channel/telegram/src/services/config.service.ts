@@ -27,6 +27,13 @@ export class ConfigService {
     // Server Configuration
     private readonly defaultServers: DefaultServer[];
 
+    // Voice Configuration
+    private readonly voiceProvider: string;
+    private readonly voiceSttModel: string;
+    private readonly voiceTtsModel: string;
+    private readonly voiceTtsVoice: string;
+    private readonly voiceEnabled: boolean;
+
     constructor() {
         // Load and parse Telegram bot tokens
         this.telegramBotTokens = (process.env.TELEGRAM_BOT_TOKENS || '')
@@ -69,6 +76,20 @@ export class ConfigService {
         // Load default servers from environment variables
         // OPENCODE_SERVER_URLS takes precedence, falls back to OPENCODE_SERVER_URL
         this.defaultServers = this.parseDefaultServers();
+
+        // Load voice configuration
+        this.voiceProvider = (process.env.VOICE_PROVIDER || 'openai').trim().toLowerCase();
+        this.voiceSttModel = (process.env.VOICE_STT_MODEL || 'whisper-1').trim();
+        this.voiceTtsModel = (process.env.VOICE_TTS_MODEL || 'tts-1').trim();
+        this.voiceTtsVoice = (process.env.VOICE_TTS_VOICE || 'alloy').trim();
+        // Voice features are enabled when a relevant API key is present
+        const hasApiKey = !!(
+            process.env.OPENAI_API_KEY ||
+            process.env.AZURE_OPENAI_API_KEY ||
+            process.env.GOOGLE_API_KEY ||
+            process.env.GOOGLE_APPLICATION_CREDENTIALS
+        );
+        this.voiceEnabled = hasApiKey;
     }
 
     private parseDefaultServers(): DefaultServer[] {
@@ -162,6 +183,27 @@ export class ConfigService {
 
     getDefaultServers(): DefaultServer[] {
         return [...this.defaultServers];
+    }
+
+    // Voice Configuration Getters
+    getVoiceProvider(): string {
+        return this.voiceProvider;
+    }
+
+    getVoiceSttModel(): string {
+        return this.voiceSttModel;
+    }
+
+    getVoiceTtsModel(): string {
+        return this.voiceTtsModel;
+    }
+
+    getVoiceTtsVoice(): string {
+        return this.voiceTtsVoice;
+    }
+
+    isVoiceEnabled(): boolean {
+        return this.voiceEnabled;
     }
 
     // Debug information

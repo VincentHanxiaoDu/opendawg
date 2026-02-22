@@ -122,6 +122,8 @@ export class OpenCodeService {
                 stream: true,
                 isActive: true,
                 serverStatus: "idle",
+                ttsEnabled: false,
+                pendingTtsText: "",
             };
 
             state.sessions.set(result.data.id, userSession);
@@ -181,6 +183,8 @@ export class OpenCodeService {
                 stream: defaultSession?.stream ?? true,
                 isActive: false,
                 serverStatus: "idle",
+                ttsEnabled: defaultSession?.ttsEnabled ?? false,
+                pendingTtsText: "",
             };
 
             state.sessions.set(result.data.id, userSession);

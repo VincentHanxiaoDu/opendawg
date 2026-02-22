@@ -21,6 +21,12 @@ export interface UserSession {
     serverStatus: "idle" | "busy" | "error";
     /** Last error message from a session.error event */
     lastError?: string;
+    /** Whether TTS mode is enabled for this session (AI replies sent as voice messages) */
+    ttsEnabled: boolean;
+    /** Accumulated text for TTS synthesis, reset after each session.idle */
+    pendingTtsText: string;
+    /** Discord guild ID where the user is interacting (for voice channel routing) */
+    guildId?: string;
 }
 
 export interface UserState {

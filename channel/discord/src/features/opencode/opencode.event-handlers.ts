@@ -1,5 +1,5 @@
 import type { Event } from "@opencode-ai/sdk/v2";
-import type { Client } from "discord.js";
+import { AttachmentBuilder, type Client } from "discord.js";
 import type { UserSession, UserState } from "./opencode.types.js";
 import { escapeMarkdown, resolveChannel } from "./event-handlers/utils.js";
 import { handleTextPart, finalizeTextMessage } from "./event-handlers/message-part-updated/text-part.handler.js";
@@ -7,6 +7,23 @@ import { handleToolPart } from "./event-handlers/message-part-updated/tool-part.
 import { stopTypingIndicator, startTypingIndicator } from "./event-handlers/utils.js";
 import { cleanupTextState } from "./event-handlers/message-part-updated/text-part.handler.js";
 import { clearToolCallMessages } from "./event-handlers/message-part-updated/tool-part.handler.js";
+import { splitForTts, type VoiceProvider } from "../../services/voice.service.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
+// ─── Voice Provider registry (set by DiscordBot on init) ─────────────────────
+
+let _voiceProvider: VoiceProvider | null = null;
+let _voiceConnections: Map<string, any> | null = null;
+
+export function setVoiceProvider(vp: VoiceProvider | null): void {
+    _voiceProvider = vp;
+}
+
+export function setVoiceConnectionsRef(ref: Map<string, any>): void {
+    _voiceConnections = ref;
+}
 
 /**
  * Handler function signature for processing events.
@@ -37,6 +54,10 @@ async function handleMessagePartUpdated(
 
     if (part.type === "text" && part.text) {
         await handleTextPart(client, part.text, userSession);
+        // Accumulate for TTS
+        if (userSession.ttsEnabled) {
+            userSession.pendingTtsText = part.text;
+        }
     } else if (part.type === "tool") {
         await handleToolPart(client, part, userSession);
     }
@@ -69,7 +90,82 @@ async function handleSessionIdle(
     stopTypingIndicator(sessionId);
     await finalizeTextMessage(sessionId, client);
     clearToolCallMessages(sessionId);
+
+    // ── TTS synthesis ─────────────────────────────────────────────────────
+    if (userSession.ttsEnabled && _voiceProvider && userSession.pendingTtsText.trim()) {
+        const textToSpeak = userSession.pendingTtsText;
+        userSession.pendingTtsText = "";
+
+        // Run TTS async — don't block session.idle completion
+        synthesizeAndSendDiscord(client, userSession, textToSpeak, _voiceProvider).catch(err => {
+            console.error("[TTS] Discord synthesis error:", err);
+        });
+    } else {
+        userSession.pendingTtsText = "";
+    }
+
     return null;
+}
+
+async function synthesizeAndSendDiscord(
+    client: Client,
+    userSession: UserSession,
+    text: string,
+    voiceProvider: VoiceProvider
+): Promise<void> {
+    const chunks = splitForTts(text);
+    const channelId = userSession.channelId;
+    const guildId = userSession.guildId;
+
+    // Check if bot is in a voice channel for this guild
+    const voiceConnection = guildId && _voiceConnections ? _voiceConnections.get(guildId) : null;
+
+    for (const chunk of chunks) {
+        if (!chunk.trim()) continue;
+
+        const mp3Buffer = await voiceProvider.synthesize(chunk);
+
+        if (voiceConnection) {
+            // Play in voice channel
+            try {
+                const voiceModule = await import("@discordjs/voice");
+                const tmpPath = path.join(os.tmpdir(), `tts_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
+                fs.writeFileSync(tmpPath, mp3Buffer);
+
+                const resource = voiceModule.createAudioResource(tmpPath);
+                const player = voiceModule.createAudioPlayer();
+                voiceConnection.subscribe(player);
+                player.play(resource);
+
+                await new Promise<void>((resolve) => {
+                    player.on(voiceModule.AudioPlayerStatus.Idle, () => {
+                        try { fs.unlinkSync(tmpPath); } catch {}
+                        resolve();
+                    });
+                    player.on("error", () => {
+                        try { fs.unlinkSync(tmpPath); } catch {}
+                        resolve();
+                    });
+                });
+            } catch (err) {
+                console.error("[TTS] Voice channel playback error:", err);
+                // Fall back to attachment
+                await sendTtsAttachment(client, channelId, mp3Buffer);
+            }
+        } else if (channelId) {
+            // Send as MP3 attachment
+            await sendTtsAttachment(client, channelId, mp3Buffer);
+        }
+    }
+}
+
+async function sendTtsAttachment(client: Client, channelId: string | undefined, mp3Buffer: Buffer): Promise<void> {
+    if (!channelId) return;
+    const channel = await resolveChannel(client, channelId);
+    if (!channel) return;
+
+    const attachment = new AttachmentBuilder(mp3Buffer, { name: `tts_${Date.now()}.mp3` });
+    await channel.send({ files: [attachment] }).catch(() => {});
 }
 
 async function handleSessionError(
