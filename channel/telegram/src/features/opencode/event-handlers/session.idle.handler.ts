@@ -55,6 +55,8 @@ async function synthesizeAndSend(ctx: Context, text: string, voiceProvider: Voic
     const chatId = ctx.chat?.id;
     if (!chatId) return;
 
+    const replyToMessageId = ctx.message?.message_id;
+
     const chunks = splitForTts(text);
     const tmpFiles: string[] = [];
 
@@ -65,7 +67,9 @@ async function synthesizeAndSend(ctx: Context, text: string, voiceProvider: Voic
             const tmpPath = path.join(os.tmpdir(), `tts_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
             fs.writeFileSync(tmpPath, mp3Buffer);
             tmpFiles.push(tmpPath);
-            await ctx.api.sendVoice(chatId, new InputFile(tmpPath));
+            await ctx.api.sendVoice(chatId, new InputFile(tmpPath), {
+                reply_parameters: replyToMessageId ? { message_id: replyToMessageId } : undefined,
+            });
         }
     } finally {
         // Clean up temp files
