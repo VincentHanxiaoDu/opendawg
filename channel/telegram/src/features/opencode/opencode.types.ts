@@ -23,6 +23,10 @@ export interface UserSession {
     serverUrl?: string;
     /** Pre-computed Authorization header value (e.g. "Basic base64...") for this server */
     authHeader?: string;
+    /** Whether TTS mode is enabled for this session (AI replies sent as voice messages) */
+    ttsEnabled: boolean;
+    /** Accumulated text for TTS synthesis, reset after each session.idle */
+    pendingTtsText: string;
 }
 
 export interface UserState {

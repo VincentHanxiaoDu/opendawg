@@ -49,6 +49,11 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
         state.latestCtx = ctx;
         state.isStreaming = stream;
 
+        // Accumulate for TTS (always keep latest full text)
+        if (userSession.ttsEnabled) {
+            userSession.pendingTtsText = text;
+        }
+
         if (!stream) {
             state.finalizeTimeout = setTimeout(() => {
                 finalizeTextMessage(sessionId, ctx);

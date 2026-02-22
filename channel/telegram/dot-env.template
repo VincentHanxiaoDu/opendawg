@@ -26,3 +26,32 @@ MESSAGE_DELETE_TIMEOUT=10000
 # Example: OPENCODE_SERVER_URL=http://192.168.1.100:4096
 OPENCODE_SERVER_URL=http://localhost:4096
 
+# ─── Voice / TTS / STT Configuration ─────────────────────────────────────────
+# Voice features are automatically enabled when a provider API key is present.
+#
+# Voice provider: "openai" (default) | "azure" | "google" (not yet implemented)
+# VOICE_PROVIDER=openai
+#
+# TTS voice (default: alloy — options: alloy, echo, fable, onyx, nova, shimmer)
+# VOICE_TTS_VOICE=alloy
+#
+# ── Option A: OpenAI ──────────────────────────────────────────────────────────
+# VOICE_PROVIDER=openai
+# OPENAI_API_KEY=sk-...
+# VOICE_STT_MODEL=whisper-1        # default: whisper-1
+# VOICE_TTS_MODEL=tts-1            # default: tts-1 (use tts-1-hd for higher quality)
+#
+# ── Option B: Azure OpenAI ────────────────────────────────────────────────────
+# VOICE_PROVIDER=azure
+# AZURE_OPENAI_API_KEY=...
+# AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com
+# AZURE_OPENAI_API_VERSION=2024-06-01   # default: 2024-06-01
+# AZURE_VOICE_STT_DEPLOYMENT=whisper    # your Whisper deployment name (default: whisper)
+# AZURE_VOICE_TTS_DEPLOYMENT=tts        # your TTS deployment name   (default: tts)
+#
+# Usage:
+#   - Send a voice message or audio file → auto-transcribed and sent to AI
+#   - Use /tts to toggle voice replies on/off (default: off)
+#   - Use /tts on  → AI replies sent as voice messages
+#   - Use /tts off → AI replies sent as text (default)
+

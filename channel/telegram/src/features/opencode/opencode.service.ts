@@ -143,6 +143,8 @@ export class OpenCodeService {
                 serverStatus: "idle",
                 serverUrl: this.getBaseUrl(userId),
                 authHeader,
+                ttsEnabled: false,
+                pendingTtsText: "",
             };
 
             state.sessions.set(result.data.id, userSession);
@@ -207,6 +209,8 @@ export class OpenCodeService {
                 stream: defaultSession?.stream ?? true,
                 isActive: false,
                 serverStatus: "idle",
+                ttsEnabled: defaultSession?.ttsEnabled ?? false,
+                pendingTtsText: "",
             };
 
             state.sessions.set(result.data.id, userSession);

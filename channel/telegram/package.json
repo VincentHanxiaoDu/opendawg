@@ -74,6 +74,7 @@
     "@ai-sdk/openai": "^2.0.23",
     "@google/genai": "^1.24.0",
     "@opencode-ai/sdk": "^1.0.224",
+    "openai": "^4.103.0",
     "ai": "^5.0.30",
     "archiver": "^7.0.1",
     "better-sqlite3": "^9.6.0",

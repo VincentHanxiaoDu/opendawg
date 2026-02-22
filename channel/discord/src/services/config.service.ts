@@ -21,6 +21,13 @@ export class ConfigService {
 
     private readonly defaultServers: DefaultServer[];
 
+    // Voice Configuration
+    private readonly voiceProvider: string;
+    private readonly voiceSttModel: string;
+    private readonly voiceTtsModel: string;
+    private readonly voiceTtsVoice: string;
+    private readonly voiceEnabled: boolean;
+
     constructor() {
         this.discordBotToken = (process.env.DISCORD_BOT_TOKEN || '').trim();
         this.discordAppId = (process.env.DISCORD_APP_ID || '').trim();
@@ -45,6 +52,19 @@ export class ConfigService {
         this.homeDirectory = process.env.HOME || '/tmp';
 
         this.defaultServers = this.parseDefaultServers();
+
+        // Load voice configuration
+        this.voiceProvider = (process.env.VOICE_PROVIDER || 'openai').trim().toLowerCase();
+        this.voiceSttModel = (process.env.VOICE_STT_MODEL || 'whisper-1').trim();
+        this.voiceTtsModel = (process.env.VOICE_TTS_MODEL || 'tts-1').trim();
+        this.voiceTtsVoice = (process.env.VOICE_TTS_VOICE || 'alloy').trim();
+        const hasApiKey = !!(
+            process.env.OPENAI_API_KEY ||
+            process.env.AZURE_OPENAI_API_KEY ||
+            process.env.GOOGLE_API_KEY ||
+            process.env.GOOGLE_APPLICATION_CREDENTIALS
+        );
+        this.voiceEnabled = hasApiKey;
     }
 
     private parseDefaultServers(): DefaultServer[] {
@@ -123,6 +143,27 @@ export class ConfigService {
 
     getDefaultServers(): DefaultServer[] {
         return [...this.defaultServers];
+    }
+
+    // Voice Configuration Getters
+    getVoiceProvider(): string {
+        return this.voiceProvider;
+    }
+
+    getVoiceSttModel(): string {
+        return this.voiceSttModel;
+    }
+
+    getVoiceTtsModel(): string {
+        return this.voiceTtsModel;
+    }
+
+    getVoiceTtsVoice(): string {
+        return this.voiceTtsVoice;
+    }
+
+    isVoiceEnabled(): boolean {
+        return this.voiceEnabled;
     }
 
     validate(): void {

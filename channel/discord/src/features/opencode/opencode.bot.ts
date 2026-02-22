@@ -31,8 +31,11 @@ import {
     setPendingJump, consumePendingJump,
     totalPages, getPageSlice, PAGE_SIZE,
 } from "../../utils/pagination.js";
+import { createVoiceProvider, splitForTts, type VoiceProvider } from "../../services/voice.service.js";
+import { setVoiceProvider as setIdleVoiceProvider, setVoiceConnectionsRef } from "./opencode.event-handlers.js";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
 function timeAgo(ts: number): string {
     const tsSeconds = ts > 1e10 ? Math.floor(ts / 1000) : ts;
@@ -48,6 +51,9 @@ export class DiscordBot {
     private opencodeService: OpenCodeService;
     private configService: ConfigService;
     private serverRegistry: ServerRegistry;
+    private voiceProvider: VoiceProvider | null = null;
+    /** guildId → VoiceConnection (dynamic import, typed as any to avoid hard dep at compile time) */
+    private voiceConnections: Map<string, any> = new Map();
 
     constructor(
         opencodeService: OpenCodeService,
@@ -59,6 +65,25 @@ export class DiscordBot {
         this.serverRegistry = serverRegistry;
 
         setMessageDeleteTimeout(configService.getMessageDeleteTimeout());
+
+        // Initialize voice provider if voice features are enabled
+        if (configService.isVoiceEnabled()) {
+            try {
+                this.voiceProvider = createVoiceProvider({
+                    provider: configService.getVoiceProvider(),
+                    openaiApiKey: process.env.OPENAI_API_KEY,
+                    sttModel: configService.getVoiceSttModel(),
+                    ttsModel: configService.getVoiceTtsModel(),
+                    ttsVoice: configService.getVoiceTtsVoice(),
+                });
+                // Register with event handlers for TTS delivery
+                setIdleVoiceProvider(this.voiceProvider);
+                setVoiceConnectionsRef(this.voiceConnections);
+                console.log(`[Voice] Provider initialized: ${configService.getVoiceProvider()}`);
+            } catch (err) {
+                console.warn(`[Voice] Failed to initialize voice provider: ${err instanceof Error ? err.message : err}`);
+            }
+        }
     }
 
     /**
@@ -97,6 +122,10 @@ export class DiscordBot {
                 .addSubcommand(sub => sub.setName('use').setDescription('Switch active server')
                     .addStringOption(opt => opt.setName('id').setDescription('Server ID').setRequired(true))),
             new SlashCommandBuilder().setName('status').setDescription('Show full status'),
+            new SlashCommandBuilder().setName('tts').setDescription('Toggle text-to-speech mode for AI replies')
+                .addBooleanOption(opt => opt.setName('enabled').setDescription('Enable or disable TTS').setRequired(false)),
+            new SlashCommandBuilder().setName('join-voice').setDescription('Join your current voice channel and enable real-time speech input'),
+            new SlashCommandBuilder().setName('leave-voice').setDescription('Leave the voice channel and stop listening'),
         ].map(cmd => cmd.toJSON());
     }
 
@@ -169,6 +198,9 @@ export class DiscordBot {
             case 'servers': await this.handleServers(interaction); break;
             case 'server': await this.handleServer(interaction); break;
             case 'status': await this.handleStatus(interaction); break;
+            case 'tts': await this.handleTts(interaction); break;
+            case 'join-voice': await this.handleJoinVoice(interaction); break;
+            case 'leave-voice': await this.handleLeaveVoice(interaction); break;
             default:
                 await interaction.reply({ content: `Unknown command: ${cmd}`, ephemeral: true });
         }
@@ -1126,22 +1158,232 @@ export class DiscordBot {
             fs.mkdirSync(mediaDir, { recursive: true });
         }
 
+        const audioAttachments: { buffer: Buffer; mimeType: string }[] = [];
+        const nonAudioPaths: string[] = [];
+
         for (const [, attachment] of message.attachments) {
             try {
                 const response = await fetch(attachment.url);
                 const buffer = Buffer.from(await response.arrayBuffer());
-                const filePath = path.join(mediaDir, attachment.name || 'upload');
-                fs.writeFileSync(filePath, buffer);
+                const contentType = attachment.contentType ?? "";
 
-                const caption = message.content || '';
-                if (caption) {
-                    await this.opencodeService.sendPrompt(userId, caption, `File uploaded: ${filePath}`);
+                // Detect audio attachments for STT
+                const isAudio = contentType.startsWith("audio/") ||
+                    /\.(ogg|mp3|m4a|wav|aac|webm|flac)$/i.test(attachment.name ?? "");
+
+                if (isAudio && this.voiceProvider) {
+                    audioAttachments.push({ buffer, mimeType: contentType || "audio/ogg" });
                 } else {
-                    await message.reply(`File saved: \`${filePath}\``);
+                    // Save non-audio files to disk
+                    const filePath = path.join(mediaDir, attachment.name || 'upload');
+                    fs.writeFileSync(filePath, buffer);
+                    nonAudioPaths.push(filePath);
                 }
             } catch (error) {
                 await message.reply(ErrorUtils.createErrorMessage("process file upload", error));
             }
         }
+
+        // Handle audio STT
+        if (audioAttachments.length > 0 && this.voiceProvider) {
+            try {
+                const transcripts: string[] = [];
+                for (const { buffer, mimeType } of audioAttachments) {
+                    const transcript = await this.voiceProvider.transcribe(buffer, { mimeType });
+                    if (transcript.trim()) transcripts.push(transcript.trim());
+                }
+
+                if (transcripts.length === 0) {
+                    await message.reply("🔇 Could not transcribe audio — please try again or send text.");
+                    return;
+                }
+
+                const caption = message.content?.trim() || "";
+                const transcriptText = transcripts.join("\n");
+                const promptText = caption ? `${transcriptText}\n\n${caption}` : transcriptText;
+
+                await this.opencodeService.sendPrompt(userId, promptText);
+            } catch (err) {
+                await message.reply(`❌ Transcription failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            return;
+        }
+
+        // Handle non-audio file uploads (original behavior)
+        const caption = message.content || '';
+        for (const filePath of nonAudioPaths) {
+            if (caption) {
+                await this.opencodeService.sendPrompt(userId, caption, `File uploaded: ${filePath}`);
+            } else {
+                await message.reply(`File saved: \`${filePath}\``);
+            }
+        }
+    }
+
+    // ─── TTS command ─────────────────────────────────────────────────────────
+
+    private async handleTts(interaction: ChatInputCommandInteraction): Promise<void> {
+        const userId = interaction.user.id;
+
+        if (!this.voiceProvider) {
+            await interaction.reply({
+                content: "❌ Voice features are not available. Please set `OPENAI_API_KEY` in your environment to enable TTS/STT.",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        const userSession = this.opencodeService.getUserSession(userId);
+        if (!userSession) {
+            await interaction.reply({ content: "❌ No active session. Use `/opencode` to start one.", ephemeral: true });
+            return;
+        }
+
+        const enabled = interaction.options.getBoolean('enabled');
+        if (enabled !== null) {
+            userSession.ttsEnabled = enabled;
+        } else {
+            // Toggle
+            userSession.ttsEnabled = !userSession.ttsEnabled;
+        }
+
+        const status = userSession.ttsEnabled ? "✅ TTS **enabled**" : "🔇 TTS **disabled**";
+        const hint = userSession.ttsEnabled
+            ? "\nAI replies will be sent as voice messages."
+            : "\nAI replies will be sent as text.";
+
+        await interaction.reply({ content: `${status}${hint}`, ephemeral: true });
+    }
+
+    // ─── Voice channel: join ─────────────────────────────────────────────────
+
+    private async handleJoinVoice(interaction: ChatInputCommandInteraction): Promise<void> {
+        const userId = interaction.user.id;
+        const guildId = interaction.guildId;
+
+        if (!guildId) {
+            await interaction.reply({ content: "❌ This command can only be used in a server.", ephemeral: true });
+            return;
+        }
+
+        if (!this.voiceProvider) {
+            await interaction.reply({
+                content: "❌ Voice features are not available. Please set `OPENAI_API_KEY` to enable.",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        // Dynamically import @discordjs/voice to avoid hard dep at startup
+        let voiceModule: any;
+        try {
+            voiceModule = await import("@discordjs/voice");
+        } catch {
+            await interaction.reply({
+                content: "❌ Voice support requires `@discordjs/voice` to be installed. Run `npm install @discordjs/voice @discordjs/opus`.",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        const guild = interaction.guild;
+        const member = guild?.members.cache.get(userId) ?? await guild?.members.fetch(userId).catch(() => null);
+        const voiceChannel = (member as any)?.voice?.channel;
+
+        if (!voiceChannel) {
+            await interaction.reply({ content: "❌ You must be in a voice channel first.", ephemeral: true });
+            return;
+        }
+
+        // Disconnect existing connection if any
+        if (this.voiceConnections.has(guildId)) {
+            try { this.voiceConnections.get(guildId)?.destroy(); } catch {}
+            this.voiceConnections.delete(guildId);
+        }
+
+        const connection = voiceModule.joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId,
+            adapterCreator: guild!.voiceAdapterCreator,
+            selfDeaf: false,
+            selfMute: false,
+        });
+
+        this.voiceConnections.set(guildId, connection);
+
+        // Update active session's guildId for TTS routing
+        const userSession = this.opencodeService.getUserSession(userId);
+        if (userSession) userSession.guildId = guildId;
+
+        // Start listening for speech from each user
+        connection.receiver.speaking.on("start", (speakingUserId: string) => {
+            this.startListeningToUser(connection, speakingUserId, guildId, voiceModule);
+        });
+
+        connection.on(voiceModule.VoiceConnectionStatus.Disconnected, () => {
+            this.voiceConnections.delete(guildId);
+        });
+
+        await interaction.reply({
+            content: `✅ Joined **${voiceChannel.name}**. Start speaking to send prompts to your active session.`,
+            ephemeral: false,
+        });
+    }
+
+    private startListeningToUser(connection: any, speakingUserId: string, guildId: string, voiceModule: any): void {
+        const MAX_RECORDING_MS = 30_000;
+        const receiver = connection.receiver;
+        const opusStream = receiver.subscribe(speakingUserId, { end: { behavior: voiceModule.EndBehaviorType.AfterSilence, duration: 500 } });
+
+        const chunks: Buffer[] = [];
+        const timeout = setTimeout(() => { opusStream.destroy(); }, MAX_RECORDING_MS);
+
+        opusStream.on("data", (chunk: Buffer) => chunks.push(chunk));
+        opusStream.on("end", async () => {
+            clearTimeout(timeout);
+            if (chunks.length === 0 || !this.voiceProvider) return;
+
+            const combined = Buffer.concat(chunks);
+            try {
+                const transcript = await this.voiceProvider.transcribe(combined, { mimeType: "audio/ogg" });
+                if (!transcript.trim()) return;
+
+                console.log(`[Voice] STT for user ${speakingUserId}: "${transcript.slice(0, 80)}..."`);
+
+                // Route to the speaking user's active session
+                if (this.opencodeService.hasActiveSession(speakingUserId)) {
+                    await this.opencodeService.sendPrompt(speakingUserId, transcript.trim());
+                }
+            } catch (err) {
+                console.error(`[Voice] STT error for user ${speakingUserId}:`, err);
+            }
+        });
+
+        opusStream.on("error", (err: Error) => {
+            clearTimeout(timeout);
+            console.error(`[Voice] Stream error for user ${speakingUserId}:`, err);
+        });
+    }
+
+    // ─── Voice channel: leave ────────────────────────────────────────────────
+
+    private async handleLeaveVoice(interaction: ChatInputCommandInteraction): Promise<void> {
+        const guildId = interaction.guildId;
+
+        if (!guildId) {
+            await interaction.reply({ content: "❌ This command can only be used in a server.", ephemeral: true });
+            return;
+        }
+
+        const connection = this.voiceConnections.get(guildId);
+        if (!connection) {
+            await interaction.reply({ content: "❌ Not currently in a voice channel.", ephemeral: true });
+            return;
+        }
+
+        try { connection.destroy(); } catch {}
+        this.voiceConnections.delete(guildId);
+
+        await interaction.reply({ content: "👋 Left the voice channel.", ephemeral: false });
     }
 }
