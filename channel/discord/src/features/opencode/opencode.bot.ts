@@ -122,8 +122,15 @@ export class DiscordBot {
                 .addSubcommand(sub => sub.setName('use').setDescription('Switch active server')
                     .addStringOption(opt => opt.setName('id').setDescription('Server ID').setRequired(true))),
             new SlashCommandBuilder().setName('status').setDescription('Show full status'),
-            new SlashCommandBuilder().setName('tts').setDescription('Toggle text-to-speech mode for AI replies')
-                .addBooleanOption(opt => opt.setName('enabled').setDescription('Enable or disable TTS').setRequired(false)),
+            new SlashCommandBuilder().setName('tts').setDescription('Toggle AI voice replies on or off (requires OPENAI_API_KEY)')
+                .addStringOption(opt => opt
+                    .setName('mode')
+                    .setDescription('Enable or disable TTS voice replies')
+                    .setRequired(false)
+                    .addChoices(
+                        { name: 'on  — AI replies as voice messages', value: 'on' },
+                        { name: 'off — AI replies as text (default)', value: 'off' },
+                    )),
             new SlashCommandBuilder().setName('join-voice').setDescription('Join your current voice channel and enable real-time speech input'),
             new SlashCommandBuilder().setName('leave-voice').setDescription('Leave the voice channel and stop listening'),
         ].map(cmd => cmd.toJSON());
@@ -1239,11 +1246,13 @@ export class DiscordBot {
             return;
         }
 
-        const enabled = interaction.options.getBoolean('enabled');
-        if (enabled !== null) {
-            userSession.ttsEnabled = enabled;
+        const mode = interaction.options.getString('mode');
+        if (mode === 'on') {
+            userSession.ttsEnabled = true;
+        } else if (mode === 'off') {
+            userSession.ttsEnabled = false;
         } else {
-            // Toggle
+            // No argument — toggle
             userSession.ttsEnabled = !userSession.ttsEnabled;
         }
 
