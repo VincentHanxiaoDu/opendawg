@@ -99,7 +99,12 @@ async function startBot() {
                 { command: 'servers', description: 'List configured opencode servers' },
                 { command: 'server', description: 'Manage servers: add/remove/use' },
                 { command: 'esc', description: 'Abort current AI operation' },
+                { command: 'undo', description: 'Undo the last message' },
+                { command: 'redo', description: 'Redo a previously undone message' },
                 { command: 'verbosity', description: 'Set detail level [0-3] [stream:0/1]' },
+                { command: 'model', description: 'Show or switch the active AI model' },
+                { command: 'tts', description: 'Toggle voice replies: /tts on | off' },
+                { command: 'status', description: 'Show full status' },
             ]);
             console.log('[TelegramCoder] ✅ Bot commands registered');
         } catch (error) {
