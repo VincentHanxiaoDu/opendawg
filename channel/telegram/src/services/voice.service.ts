@@ -181,6 +181,7 @@ export class AzureVoiceProvider implements VoiceProvider {
 
     async synthesize(text: string, options?: SynthesizeOptions): Promise<Buffer> {
         const voice = options?.voice ?? this.defaultVoice;
+        const model = options?.model ?? this.ttsDeployment;
         const speed = options?.speed ?? 1.0;
 
         const url = `${this.endpoint}/openai/deployments/${this.ttsDeployment}/audio/speech?api-version=${this.apiVersion}`;
@@ -191,6 +192,7 @@ export class AzureVoiceProvider implements VoiceProvider {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
+                model,
                 input: text,
                 voice,
                 speed,
