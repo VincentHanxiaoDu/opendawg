@@ -1719,6 +1719,28 @@ export class OpenCodeBot {
 
                     console.log(`✓ STT transcribed: "${transcript.slice(0, 80)}..." (${fileType}, ${buffer.length} bytes)`);
 
+                    // Check if there's a pending question awaiting a custom answer
+                    const pendingQuestion = getPendingQuestion(userId);
+                    if (pendingQuestion) {
+                        pendingQuestionAnswers.delete(userId);
+                        try {
+                            const baseUrl = process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
+                            const res = await fetch(`${baseUrl}/question/${pendingQuestion.callId}/reply`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ answers: [[transcript]] }),
+                            });
+                            if (res.ok) {
+                                await ctx.reply(`✅ Answer sent: <b>${escapeHtml(transcript)}</b>`, { parse_mode: "HTML" });
+                            } else {
+                                await ctx.reply("❌ Failed to send answer");
+                            }
+                        } catch {
+                            await ctx.reply("❌ Failed to send answer");
+                        }
+                        return;
+                    }
+
                     if (this.opencodeService.hasActiveSession(userId)) {
                         const caption = message.caption?.trim();
                         const promptText = caption
