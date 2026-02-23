@@ -41,16 +41,20 @@ plugins:
     execution_mode: native
     config: {}
   channel-telegram:
-    enabled: false
+    enabled: true
     execution_mode: docker
     config:
-      bot_token: ${vault:telegram_bot_token}
-      allowed_user_ids: ""
-      admin_user_id: ""
+      bot_token: REDACTED_BOT_TOKEN_2
+      allowed_user_ids: "7930109134"
+      admin_user_id: "7930109134"
       message_delete_timeout: 0
       server_urls: ""
-      server_url: http://localhost:4096
+      server_url: http://host.docker.internal:4096
       media_dir: ~/opendawg/media/telegram
+      voice_api_version: 2024-06-01
+      voice_stt_deployment: whisper
+      voice_tts_deployment: tts
+      voice_tts_voice: alloy
   channel-discord:
     enabled: false
     execution_mode: docker

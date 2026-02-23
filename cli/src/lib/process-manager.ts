@@ -103,11 +103,18 @@ export async function stopNativePlugin(plugin: PluginInfo): Promise<void> {
 }
 
 /**
- * Check if a native-mode plugin is currently running.
- * Uses the health check hook if available, otherwise checks the PID.
+ * Check if a plugin is currently running.
+ * For docker-mode plugins, checks Docker container status.
+ * For native-mode plugins, uses health check hook or PID check.
  */
 export async function isPluginRunning(plugin: PluginInfo): Promise<boolean> {
-  // Prefer the health_check hook
+  // Docker-mode plugins: check container status
+  const mode = plugin.state.executionMode ?? plugin.manifest.execution?.default ?? null;
+  if (mode === 'docker') {
+    return isDockerPluginRunning(plugin.name);
+  }
+
+  // Prefer the health_check hook for native plugins
   const healthCheckCmd = plugin.manifest.hooks?.health_check;
   if (healthCheckCmd) {
     try {
@@ -130,6 +137,35 @@ export async function isPluginRunning(plugin: PluginInfo): Promise<boolean> {
   const pid = await readPid(plugin.name);
   if (pid === null) return false;
   return isProcessAlive(pid);
+}
+
+/**
+ * Check if a Docker-mode plugin has a running container.
+ * Looks for containers in the "opendawg" compose project matching the plugin name.
+ */
+async function isDockerPluginRunning(pluginName: string): Promise<boolean> {
+  try {
+    const { stdout } = await exec(
+      `docker compose --project-name opendawg ps --format json ${pluginName}`,
+      { timeout: 10000 },
+    );
+    if (!stdout.trim()) return false;
+
+    // docker compose ps --format json outputs one JSON object per line
+    const lines = stdout.trim().split('\n');
+    for (const line of lines) {
+      try {
+        const container = JSON.parse(line);
+        const state = (container.State || '').toLowerCase();
+        if (state === 'running') return true;
+      } catch {
+        // Skip lines that aren't JSON
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**

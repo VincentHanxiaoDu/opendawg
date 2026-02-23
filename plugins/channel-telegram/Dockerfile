@@ -7,10 +7,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy plugin source
-COPY . .
+# Copy channel-core first and build it
+COPY packages/channel-core/ packages/channel-core/
 
-RUN npm install --legacy-peer-deps && npm rebuild better-sqlite3 && npm run build:prod
+# Copy plugin source
+COPY plugins/channel-telegram/ plugins/channel-telegram/
+
+# Create a minimal root package.json for npm workspaces
+RUN echo '{"private":true,"workspaces":["packages/channel-core","plugins/channel-telegram"]}' > package.json
+
+# Install all workspace dependencies and build
+RUN npm install --legacy-peer-deps \
+    && cd packages/channel-core && npm run build && cd ../.. \
+    && cd plugins/channel-telegram && npm rebuild better-sqlite3 && npm run build:prod
+
+WORKDIR /app/plugins/channel-telegram
 
 # Health check: verify the node process is running
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \

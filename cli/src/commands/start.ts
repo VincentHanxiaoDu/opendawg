@@ -149,15 +149,21 @@ export function registerStartCommand(program: Command): void {
         if (dockerPlugins.length > 0) {
           info(`Starting docker plugins: ${dockerPlugins.map((p) => p.name).join(', ')}...`);
 
-          // Resolve vault references so env vars are populated
-          const resolvedConfig = resolveVaultRefs(config);
-
-          // Build env map from resolved plugin configs
+          // Build env map from plugin configs, resolving vault refs per-plugin
           const env: Record<string, string> = {};
           for (const plugin of dockerPlugins) {
-            const pluginCfg = resolvedConfig.plugins?.[plugin.name]?.config;
+            const pluginCfg = config.plugins?.[plugin.name]?.config;
             if (pluginCfg) {
-              for (const [key, value] of Object.entries(pluginCfg)) {
+              // Resolve vault refs only for this plugin's config
+              let resolvedCfg: Record<string, any>;
+              try {
+                resolvedCfg = resolveVaultRefs(pluginCfg);
+              } catch (vaultErr) {
+                warn(`Vault resolution failed for "${plugin.name}": ${vaultErr instanceof Error ? vaultErr.message : String(vaultErr)}`);
+                warn('Using raw config values (vault references will not be resolved).');
+                resolvedCfg = pluginCfg;
+              }
+              for (const [key, value] of Object.entries(resolvedCfg)) {
                 if (value !== undefined && value !== null) {
                   env[`${plugin.name.toUpperCase().replace(/-/g, '_')}_${key.toUpperCase()}`] = String(value);
                 }
