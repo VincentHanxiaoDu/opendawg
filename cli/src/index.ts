@@ -13,7 +13,7 @@ import { registerMigrateCommand } from './commands/migrate.js';
 import { error } from './utils/logger.js';
 
 const require = createRequire(import.meta.url);
-const pkg = require('../../package.json') as { version: string };
+const pkg = require('../package.json') as { version: string };
 
 const program = new Command();
 
