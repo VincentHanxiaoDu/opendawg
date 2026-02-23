@@ -24,7 +24,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@opendawg/channel-core": "workspace:*",
+    "@opendawg/channel-core": "*",
     "discord.js": "^14.18.0",
     "@opencode-ai/sdk": "^1.0.224",
     "@discordjs/voice": "^0.18.0",

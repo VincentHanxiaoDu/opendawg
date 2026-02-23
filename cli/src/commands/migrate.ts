@@ -187,17 +187,17 @@ export function registerMigrateCommand(program: Command): void {
   program
     .command('migrate')
     .description('Migrate a .env file into opendawg.yaml and vault')
-    .option('-e, --env-file <path>', 'Path to .env file', '.env')
-    .action(async (opts: { envFile: string }) => {
+    .option('-f, --from <path>', 'Path to .env file', '.env')
+    .action(async (opts: { from: string }) => {
       try {
-        const envPath = path.resolve(opts.envFile);
+        const envPath = path.resolve(opts.from);
 
         // Read the .env file
         let envContent: string;
         try {
           envContent = await fs.readFile(envPath, 'utf-8');
         } catch {
-          error(`Could not read .env file at "${envPath}". Use --env-file to specify a path.`);
+          error(`Could not read .env file at "${envPath}". Use --from to specify a path.`);
           process.exitCode = 1;
           return;
         }
