@@ -1,0 +1,169 @@
+import { Bot } from "grammy";
+import { ConfigService } from './services/config.service.js';
+import { ServerRegistry } from './services/server-registry.service.js';
+import { OpenCodeService } from './features/opencode/opencode.service.js';
+import { OpenCodeBot } from './features/opencode/opencode.bot.js';
+import { AccessControlMiddleware } from './middleware/access-control.middleware.js';
+import dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
+
+console.log('[TelegramCoder] Starting bot...');
+
+dotenv.config();
+
+// Initialize config service
+const configService = new ConfigService();
+
+try {
+    configService.validate();
+    console.log('[TelegramCoder] Configuration loaded successfully');
+    console.log(configService.getDebugInfo());
+} catch (error) {
+    console.error('[TelegramCoder] Configuration error:', error);
+    process.exit(1);
+}
+
+// Get the first bot token
+const tokens = configService.getTelegramBotTokens();
+if (tokens.length === 0) {
+    console.error('[TelegramCoder] No bot tokens found in configuration');
+    process.exit(1);
+}
+
+const botToken = tokens[0];
+console.log(`[TelegramCoder] Initializing with token: ${botToken.substring(0, 10)}...`);
+
+// Create bot instance
+const bot = new Bot(botToken);
+
+// Initialize server registry (SQLite-backed, falls back to memory)
+const serverRegistry = new ServerRegistry(configService.getDefaultServers());
+
+// Initialize services
+const opencodeService = new OpenCodeService(undefined, serverRegistry);
+
+// Set global error handler to prevent crashes
+bot.catch((err) => {
+    const ctx = err.ctx;
+    console.error(`[TelegramCoder] Error while handling update ${ctx.update.update_id}:`, err.error);
+});
+
+// Set config service for access control
+AccessControlMiddleware.setConfigService(configService);
+
+// Set bot instance for access control (needed for admin notifications)
+AccessControlMiddleware.setBot(bot);
+
+// Initialize the OpenCode bot
+const opencodeBot = new OpenCodeBot(opencodeService, configService, serverRegistry);
+
+// Register handlers
+opencodeBot.registerHandlers(bot);
+
+async function startBot() {
+    try {
+        console.log('[TelegramCoder] Starting initialization...');
+
+        // Clean up media directory if configured
+        if (configService.shouldCleanUpMediaDir()) {
+            const botMediaPath = path.join(configService.getMediaTmpLocation(), 'bot-1');
+            if (fs.existsSync(botMediaPath)) {
+                console.log(`[TelegramCoder] Cleaning up media directory: ${botMediaPath}`);
+                fs.rmSync(botMediaPath, { recursive: true, force: true });
+                console.log('[TelegramCoder] ✅ Media directory cleaned');
+            }
+        }
+
+        // Get bot info
+        try {
+            const me = await bot.api.getMe();
+            const fullName = [me.first_name, me.last_name].filter(Boolean).join(" ");
+            console.log(`[TelegramCoder] Bot info: ${fullName} (@${me.username})`);
+        } catch (error) {
+            console.error('[TelegramCoder] Failed to get bot info:', error);
+        }
+
+        // Set bot commands for Telegram UI
+        try {
+            await bot.api.setMyCommands([
+                { command: 'start', description: 'Show help message' },
+                { command: 'help', description: 'Show help message' },
+                { command: 'opencode', description: 'Start a new OpenCode session' },
+                { command: 'sessions', description: 'List sessions with status flags' },
+                { command: 'session', description: 'Switch to or attach a session' },
+                { command: 'history', description: 'Show recent messages in current session' },
+                { command: 'detach', description: 'Detach from current session' },
+                { command: 'rename', description: 'Rename current session' },
+                { command: 'endsession', description: 'End current session' },
+                { command: 'servers', description: 'List configured opencode servers' },
+                { command: 'server', description: 'Manage servers: add/remove/use' },
+                { command: 'esc', description: 'Abort current AI operation' },
+                { command: 'undo', description: 'Undo the last message' },
+                { command: 'redo', description: 'Redo a previously undone message' },
+                { command: 'verbosity', description: 'Set detail level [0-3] [stream:0/1]' },
+                { command: 'model', description: 'Show or switch the active AI model' },
+                { command: 'tts', description: 'Toggle voice replies: /tts on | off' },
+                { command: 'status', description: 'Show full status' },
+            ]);
+            console.log('[TelegramCoder] ✅ Bot commands registered');
+        } catch (error) {
+            console.error('[TelegramCoder] Failed to set bot commands:', error);
+        }
+
+        // Start the bot
+        await bot.start();
+        console.log('[TelegramCoder] ✅ Bot started successfully');
+    } catch (error) {
+        console.error('[TelegramCoder] Failed to start:', error);
+        process.exit(1);
+    }
+}
+
+let shuttingDown = false;
+
+/**
+ * Graceful shutdown handler for cleanup on process termination
+ */
+async function gracefulShutdown(signal: string): Promise<void> {
+    if (shuttingDown) {
+        console.log('[TelegramCoder] Shutdown already in progress...');
+        return;
+    }
+
+    shuttingDown = true;
+    console.log(`[TelegramCoder] Received ${signal}, shutting down gracefully...`);
+
+    try {
+        opencodeService.stopAllEventStreams();
+        serverRegistry.close();
+        await bot.stop();
+
+        console.log('[TelegramCoder] ✅ Shutdown complete');
+        process.exit(0);
+    } catch (error) {
+        console.error('[TelegramCoder] Error during shutdown:', error);
+        process.exit(1);
+    }
+}
+
+// Handle graceful shutdown for both SIGINT and SIGTERM
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[TelegramCoder] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+    console.error('[TelegramCoder] Uncaught Exception:', error);
+    gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+
+// Start the bot
+startBot().catch((error) => {
+    console.error('[TelegramCoder] Fatal error:', error);
+    process.exit(1);
+});

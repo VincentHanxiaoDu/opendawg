@@ -1,0 +1,73 @@
+name: graphiti-memory
+version: 1.0.0
+description: >
+  Long-term memory backed by Graphiti knowledge graph — persist and query knowledge
+  across sessions with rich metadata. Uses Neo4j + Azure OpenAI for semantic search
+  and entity resolution.
+category: skill
+
+execution:
+  modes:
+    - docker
+  default: docker
+
+system_deps:
+  docker:
+    - docker
+
+requires_plugins:
+  - config-cli
+
+config:
+  schema:
+    azure_openai_api_key:
+      type: string
+      secret: true
+      required: true
+      description: Azure OpenAI API key for LLM and embedding operations
+    azure_openai_endpoint:
+      type: string
+      required: true
+      description: Azure OpenAI endpoint URL (e.g. https://your-resource.openai.azure.com/)
+    azure_openai_deployment:
+      type: string
+      default: gpt-4.1
+      description: Azure OpenAI LLM deployment name
+    azure_openai_api_version:
+      type: string
+      default: "2025-03-01-preview"
+      description: Azure OpenAI API version
+    azure_openai_embeddings_deployment:
+      type: string
+      default: text-embedding-3-large
+      description: Azure OpenAI embeddings deployment name
+    azure_openai_embeddings_endpoint:
+      type: string
+      required: false
+      description: Azure OpenAI embeddings endpoint (defaults to azure_openai_endpoint)
+    neo4j_password:
+      type: string
+      secret: true
+      default: graphiti
+      description: Neo4j database password
+    port:
+      type: integer
+      default: 8000
+      description: Graphiti MCP server port
+    neo4j_http_port:
+      type: integer
+      default: 7474
+      description: Neo4j HTTP browser port
+    neo4j_bolt_port:
+      type: integer
+      default: 7687
+      description: Neo4j Bolt protocol port
+
+hooks:
+  post_install: scripts/install.sh
+
+docker:
+  compose_file: docker-compose.yml
+
+ai:
+  skill_file: ai/SKILL.md

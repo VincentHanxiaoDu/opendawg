@@ -8,15 +8,52 @@ You are the main orchestrating agent. Triage tasks, delegate to sub-agents, mana
 
 ---
 
+## Project Structure
+
+```
+opendawg/
+├── cli/                    # @opendawg/cli — unified CLI tool
+│   └── src/
+│       ├── commands/       # list, install, configure, start, stop, status, migrate
+│       ├── lib/            # plugin-manager, config, docker-compose, schema-validator
+│       └── utils/          # logger, prompts
+├── packages/
+│   └── channel-core/       # @opendawg/channel-core — shared channel library
+├── plugins/                # All plugins (skills + channels)
+│   ├── config-cli/         # Core: encrypted vault (Docker/native)
+│   ├── graphiti-memory/    # Skill: knowledge graph (Docker)
+│   ├── cron-scheduler/     # Skill: distributed cron (native)
+│   ├── tmux-tty/           # Skill: TTY sessions (native)
+│   ├── opendawg-agent/     # Skill: agent spawning (native)
+│   ├── mcp-cli/            # Skill: MCP server access (native)
+│   ├── openspec/           # Skill: spec-driven development (native)
+│   ├── channel-telegram/   # Channel: Telegram bot (Docker)
+│   └── channel-discord/    # Channel: Discord bot (Docker)
+├── .opencode/              # AI agent config
+│   ├── commands/           # Slash commands
+│   └── skills/             # Symlinks → plugins/*/ai/
+├── opendawg.yaml           # Project-level plugin config
+└── scripts/                # Setup/migration scripts
+```
+
+Each plugin has:
+- `plugin.yaml` — manifest (metadata, deps, config schema, execution modes)
+- `ai/SKILL.md` — AI agent instructions
+- `scripts/` — lifecycle hooks (install, configure, health)
+- `docker-compose.yml` — Docker service definitions (if applicable)
+
+---
+
 ## Tool & Skill Preference (strict priority order)
 
 When multiple approaches can accomplish the same thing, always prefer higher-priority options:
 
 1. **Native tools** — built-in Read, Edit, Write, Grep, Glob, Bash, Task, WebFetch, etc.
-2. **Official scripts/CLI** — `graphiti-agent`, `config-cli`, project scripts in known locations
-3. **mcp-cli** — `mcp call <tool> --params '...' <endpoint>` for MCP server tools
-4. **MCP servers directly** — only if mcp-cli is unavailable
-5. **Custom ad-hoc scripts** — last resort; write throwaway scripts only when nothing above works
+2. **opendawg CLI** — `opendawg list`, `opendawg status`, `opendawg configure <plugin>`, etc.
+3. **Official scripts/CLI** — `graphiti-agent`, `config-cli`, plugin scripts in `plugins/*/scripts/`
+4. **mcp-cli** — `mcp call <tool> --params '...' <endpoint>` for MCP server tools
+5. **MCP servers directly** — only if mcp-cli is unavailable
+6. **Custom ad-hoc scripts** — last resort; write throwaway scripts only when nothing above works
 
 Never reach for a lower-priority option when a higher one is available and sufficient.
 
@@ -72,19 +109,39 @@ This order is non-negotiable. Do not guess. Do not run commands hoping they'll w
 
 ---
 
-## Available Skills
+## Available Plugins
 
-| Skill | Purpose |
-|-------|---------|
-| **tmux-tty** | Run anything that needs a TTY (REPLs, interactive CLIs, editors) via isolated tmux sessions |
-| **opendawg-agent** | Spawn fully-configured opencode instances (local or remote) via tmux-tty |
-| **mcp-cli** | Use MCP servers on-demand via CLI without polluting context |
-| **config-cli** | Secure vault for API keys, passwords, tokens (AES-256-CBC encrypted) |
-| **graphiti-memory** | Long-term memory via Graphiti knowledge graph (Neo4j + LLM) |
-| **cron-scheduler** | Distributed cron scheduling via Cronicle — create, manage, and monitor scheduled jobs for AI agents |
-| **openspec** | Spec-driven development — structured planning with proposals, delta specs, designs, and tasks before writing code |
+| Plugin | Category | Purpose |
+|--------|----------|---------|
+| **config-cli** | core | Secure vault for API keys, passwords, tokens (AES-256-CBC encrypted) |
+| **graphiti-memory** | skill | Long-term memory via Graphiti knowledge graph (Neo4j + LLM) |
+| **cron-scheduler** | skill | Distributed cron scheduling via Cronicle |
+| **tmux-tty** | skill | Run anything that needs a TTY (REPLs, interactive CLIs, editors) via isolated tmux sessions |
+| **opendawg-agent** | skill | Spawn fully-configured opencode instances (local or remote) |
+| **mcp-cli** | skill | Use MCP servers on-demand via CLI without polluting context |
+| **openspec** | skill | Spec-driven development — structured planning before coding |
+| **channel-telegram** | channel | Telegram bot connector for opencode |
+| **channel-discord** | channel | Discord bot connector for opencode |
+
+Manage plugins with the CLI: `opendawg list`, `opendawg install <plugin>`, `opendawg configure <plugin>`, `opendawg start [plugins...]`.
 
 **Availability**: config-cli and graphiti-memory require their services to be running. If a skill fails, note it and proceed without it — don't block the task.
+
+---
+
+## Configuration
+
+Configuration uses hierarchical YAML with scoped plugin sections:
+
+```
+~/.opendawg/config.yaml    (global — user-level defaults)
+  ↓ overrides
+./opendawg.yaml             (project — checked into repo)
+  ↓ overrides
+CLI flags / env vars         (runtime overrides)
+```
+
+Secrets use vault references: `${vault:key_name}` — resolved at runtime from config-cli.
 
 ---
 

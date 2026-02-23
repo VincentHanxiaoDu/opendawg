@@ -1,0 +1,98 @@
+name: channel-telegram
+version: 0.1.0
+description: Telegram bot channel for OpenCode — intelligent coding assistance via Telegram
+author: opendawg
+
+execution:
+  mode: docker
+  compose_file: docker-compose.yml
+
+config:
+  bot_token:
+    type: string
+    required: true
+    secret: true
+    description: Telegram Bot API token
+
+  allowed_user_ids:
+    type: string
+    required: false
+    description: Comma-separated list of allowed Telegram user IDs
+
+  admin_user_id:
+    type: string
+    required: false
+    description: Admin Telegram user ID (receives notifications)
+
+  message_delete_timeout:
+    type: number
+    required: false
+    default: 0
+    description: Auto-delete messages after N milliseconds (0 = disabled)
+
+  server_urls:
+    type: string
+    required: false
+    description: "Comma-separated opencode server URLs, format: url|name|username|password"
+
+  server_url:
+    type: string
+    required: false
+    default: "http://localhost:4096"
+    description: Single opencode server URL (legacy fallback)
+
+  server_username:
+    type: string
+    required: false
+    description: HTTP Basic Auth username for opencode server
+
+  server_password:
+    type: string
+    required: false
+    secret: true
+    description: HTTP Basic Auth password for opencode server
+
+  media_tmp_location:
+    type: string
+    required: false
+    description: Directory for temporary media files
+
+  voice_provider:
+    type: string
+    required: false
+    description: "Voice provider: openai | azure | google"
+
+  azure_voice_api_key:
+    type: string
+    required: false
+    secret: true
+    description: Azure OpenAI API key for voice features
+
+  azure_voice_endpoint:
+    type: string
+    required: false
+    description: Azure OpenAI endpoint URL
+
+  azure_voice_api_version:
+    type: string
+    required: false
+    default: "2024-06-01"
+    description: Azure OpenAI API version
+
+  azure_voice_stt_deployment:
+    type: string
+    required: false
+    default: whisper
+    description: Azure STT deployment name
+
+  azure_voice_tts_deployment:
+    type: string
+    required: false
+    default: tts
+    description: Azure TTS deployment name
+
+  voice_tts_voice:
+    type: string
+    required: false
+    default: alloy
+    description: TTS voice name

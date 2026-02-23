@@ -1,0 +1,52 @@
+name: cron-scheduler
+version: 1.0.0
+description: >
+  AI cron/scheduler based on Cronicle — create, manage, and monitor scheduled jobs.
+  Supports cron expressions, interval scheduling, one-time runs, opencode session
+  callbacks, and distributed worker execution.
+category: skill
+
+execution:
+  modes:
+    - native
+    - docker
+  default: native
+
+system_deps:
+  native: []
+  docker:
+    - docker
+
+requires_plugins: []
+
+config:
+  schema:
+    api_key:
+      type: string
+      secret: true
+      required: false
+      description: Cronicle API key (auto-generated on first start)
+    secret:
+      type: string
+      secret: true
+      required: false
+      description: Cronicle multi-server shared secret (auto-generated on first start)
+    port:
+      type: integer
+      default: 3012
+      description: Cronicle Web UI / API port
+    admin_password:
+      type: string
+      secret: true
+      default: admin
+      description: Cronicle admin panel password
+    base_url:
+      type: string
+      default: "http://localhost:3012"
+      description: Cronicle server base URL
+
+hooks:
+  post_install: scripts/install.sh
+
+ai:
+  skill_file: ai/SKILL.md

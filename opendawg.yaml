@@ -1,0 +1,79 @@
+# opendawg.yaml — Project configuration
+# See opendawg.yaml.example for full documentation
+
+plugins:
+  # === Core ===
+  config-cli:
+    enabled: false
+    execution_mode: docker
+    config:
+      port: 9100
+      token: "${vault:config_cli_token}"
+
+  # === Skills ===
+  graphiti-memory:
+    enabled: false
+    execution_mode: docker
+    config:
+      port: 8000
+      neo4j_http_port: 7474
+      neo4j_bolt_port: 7687
+      neo4j_password: "${vault:neo4j_password}"
+      azure_openai_api_key: "${vault:azure_openai_api_key}"
+      azure_openai_endpoint: "${vault:azure_openai_endpoint}"
+      azure_openai_deployment: gpt-4.1
+      azure_openai_api_version: "2025-03-01-preview"
+      azure_openai_embeddings_deployment: text-embedding-3-large
+      azure_openai_embeddings_endpoint: "${vault:azure_openai_embeddings_endpoint}"
+
+  cron-scheduler:
+    enabled: false
+    execution_mode: native
+    config:
+      port: 3012
+      base_url: "http://localhost:3012"
+      api_key: "${vault:cronicle_api_key}"
+      secret: "${vault:cronicle_secret}"
+      admin_password: "${vault:cronicle_admin_password}"
+
+  tmux-tty:
+    enabled: false
+    execution_mode: native
+
+  opendawg-agent:
+    enabled: false
+    execution_mode: native
+
+  mcp-cli:
+    enabled: false
+    execution_mode: native
+
+  openspec:
+    enabled: false
+    execution_mode: native
+
+  # === Channels ===
+  channel-telegram:
+    enabled: false
+    execution_mode: docker
+    config:
+      bot_token: "${vault:telegram_bot_token}"
+      allowed_user_ids: ""
+      admin_user_id: ""
+      message_delete_timeout: 0
+      server_urls: ""
+      server_url: "http://localhost:4096"
+      media_dir: "~/opendawg/media/telegram"
+
+  channel-discord:
+    enabled: false
+    execution_mode: docker
+    config:
+      bot_token: "${vault:discord_bot_token}"
+      app_id: ""
+      allowed_user_ids: ""
+      admin_user_id: ""
+      message_delete_timeout: 0
+      server_urls: ""
+      server_url: "http://localhost:4096"
+      media_dir: "~/opendawg/media/discord"
