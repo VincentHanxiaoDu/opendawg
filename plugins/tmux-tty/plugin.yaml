@@ -1,0 +1,24 @@
+name: tmux-tty
+version: 1.0.0
+description: >
+  Use tmux for ALL operations that need a TTY (interactive CLI tools, REPLs, editors,
+  interactive git, full-screen terminal apps). Each session runs on its own isolated
+  tmux socket so it never interferes with the user's tmux or other sessions.
+category: skill
+
+execution:
+  modes:
+    - native
+  default: native
+
+system_deps:
+  native:
+    - tmux
+
+requires_plugins: []
+
+config:
+  schema: {}
+
+ai:
+  skill_file: ai/SKILL.md

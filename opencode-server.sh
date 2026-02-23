@@ -1,7 +1,42 @@
 #!/usr/bin/env bash
-# Bootstrap and launch opencode in headless server mode.
-# Same environment setup as opendawg-agent.sh, but runs `opencode serve`.
+# opencode-server.sh — DEPRECATED bootstrap launcher for opencode server mode.
+#
+# This script is retained for backward compatibility. New users should use:
+#
+#   opendawg start [--enable <plugin> ...]
+#
+# This wrapper prints a deprecation notice, maps legacy flags to the new
+# opendawg CLI where possible, then falls through to the original logic.
 set -euo pipefail
+
+# ──────────────────────────────────────────────────────────────────────
+# Deprecation notice
+# ──────────────────────────────────────────────────────────────────────
+_DEPRECATION_BANNER="
+╔══════════════════════════════════════════════════════════════════════╗
+║  WARNING: opencode-server.sh is DEPRECATED                         ║
+║                                                                    ║
+║  Use the new unified launcher instead:                             ║
+║                                                                    ║
+║    opendawg start                                                  ║
+║                                                                    ║
+║  Common flag mappings:                                             ║
+║    --config-cli          →  opendawg enable config-cli             ║
+║    --graphiti             →  opendawg enable graphiti-memory        ║
+║    --channel telegram     →  opendawg enable channel-telegram      ║
+║    --start-all            →  opendawg start --all                  ║
+║    --port <n>             →  set in opendawg.yaml                  ║
+║    --password <p>         →  vault: config-cli set server_password ║
+║                                                                    ║
+║  This script will be removed in a future release.                  ║
+╚══════════════════════════════════════════════════════════════════════╝
+"
+
+echo "$_DEPRECATION_BANNER" >&2
+
+# ──────────────────────────────────────────────────────────────────────
+# Original implementation (kept for backward compatibility)
+# ──────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
@@ -28,9 +63,19 @@ OPENCODE_EXTRA_ARGS=()
 # --- Help ---
 show_help() {
   cat <<'HELPEOF'
+DEPRECATED — use `opendawg start` instead.
+
 Usage: opencode-server.sh [options] [opencode-args...]
 
 Bootstrap and launch opencode as a headless server.
+
+  Flag Mapping to New CLI:
+    --config-cli          →  opendawg enable config-cli
+    --graphiti             →  opendawg enable graphiti-memory
+    --channel <name>       →  opendawg enable channel-<name>
+    --start-all            →  opendawg start --all
+    --port <n>             →  plugins.*.config.port in opendawg.yaml
+    --password <p>         →  config-cli set server_password <p>
 
 Environment & Skills Options:
   --repo <url>                  Git repo URL with .opencode/skills/ (required first run)

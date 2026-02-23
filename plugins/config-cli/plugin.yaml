@@ -1,0 +1,42 @@
+name: config-cli
+version: 1.0.0
+description: >
+  Secure key-value vault for managing sensitive credentials (API keys, passwords, tokens)
+  — encrypted at rest with AES-256-CBC. Supports both native CLI and Docker HTTP server modes.
+category: core
+
+execution:
+  modes:
+    - docker
+    - native
+  default: docker
+
+system_deps:
+  docker:
+    - docker
+  native:
+    - openssl
+
+requires_plugins: []
+
+config:
+  schema:
+    token:
+      type: string
+      secret: true
+      required: true
+      description: Master encryption token / passphrase for the vault
+    port:
+      type: integer
+      default: 9100
+      description: HTTP server port (docker mode)
+
+hooks:
+  post_install: scripts/install.sh
+
+docker:
+  compose_file: docker-compose.yml
+  dockerfile: docker/Dockerfile
+
+ai:
+  skill_file: ai/SKILL.md

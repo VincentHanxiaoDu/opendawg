@@ -1,0 +1,26 @@
+services:
+  config-cli:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${CONFIG_CLI_PORT:-9100}:9100"
+    environment:
+      - CONFIG_CLI_TOKEN=${CONFIG_CLI_TOKEN}
+      - CONFIG_CLI_PORT=9100
+    volumes:
+      - config_vault:/data/vault
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo -e 'GET /health HTTP/1.0\r\n\r\n' | socat - TCP:localhost:9100 | grep -q ok"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    restart: on-failure
+
+volumes:
+  config_vault:

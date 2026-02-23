@@ -1,0 +1,26 @@
+name: opendawg-agent
+version: 1.0.0
+description: >
+  Spawn and manage fully-configured opencode CLI sessions. Bootstrap environments
+  with skills from a git repo, set up config-cli auth and vault secrets, install/update
+  opencode, and orchestrate agents across local or remote machines.
+category: skill
+
+execution:
+  modes:
+    - native
+  default: native
+
+system_deps:
+  native:
+    - git
+    - rsync
+
+requires_plugins:
+  - config-cli
+
+config:
+  schema: {}
+
+ai:
+  skill_file: ai/SKILL.md

@@ -1,0 +1,26 @@
+{
+  "name": "@opendawg/cli",
+  "version": "0.1.0",
+  "description": "Unified CLI for managing opendawg plugins",
+  "type": "module",
+  "bin": {
+    "opendawg": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "@inquirer/prompts": "^7.3.2",
+    "chalk": "^5.4.1",
+    "yaml": "^2.7.1",
+    "cli-table3": "^0.6.5",
+    "glob": "^11.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}

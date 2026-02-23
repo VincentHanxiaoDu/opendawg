@@ -1,0 +1,49 @@
+{
+  "name": "@opendawg/channel-telegram",
+  "version": "0.1.0",
+  "description": "Telegram bot channel plugin for OpenCode — intelligent coding assistance via Telegram",
+  "main": "dist/app.js",
+  "bin": {
+    "telegramcoder": "dist/cli.js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "node esbuild.config.js",
+    "build:prod": "NODE_ENV=production node esbuild.config.js",
+    "build:tsc": "tsc --outDir dist",
+    "dev": "nodemon --watch src --ext ts --exec \"node esbuild.config.js && node dist/app.js\"",
+    "start": "node ./dist/cli.js",
+    "watch": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["telegram", "bot", "ai", "opencode", "coding-assistant", "plugin"],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.25.11",
+    "nodemon": "^3.1.10",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@opendawg/channel-core": "workspace:*",
+    "@ai-sdk/google": "^2.0.11",
+    "@ai-sdk/openai": "^2.0.23",
+    "@google/genai": "^1.24.0",
+    "@opencode-ai/sdk": "^1.0.224",
+    "openai": "^4.103.0",
+    "ai": "^5.0.30",
+    "archiver": "^7.0.1",
+    "better-sqlite3": "^9.6.0",
+    "dotenv": "^17.2.2",
+    "grammy": "^1.38.2",
+    "nanoid": "^5.1.6",
+    "node-pty": "^1.0.0",
+    "puppeteer": "^24.25.0",
+    "zod": "^4.1.5"
+  }
+}
