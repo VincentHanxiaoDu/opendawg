@@ -1,0 +1,23 @@
+# Only send what Docker needs — keeps build context small
+*
+
+# Include packages
+!packages/channel-core/
+
+# Include plugins
+!plugins/
+
+# Include CLI
+!cli/
+
+# Include root config files
+!package.json
+!tsconfig.json
+
+# Include scripts
+!scripts/
+
+# Exclude build artifacts and dependencies from copied dirs
+**/node_modules
+**/dist
+**/.tsbuildinfo
