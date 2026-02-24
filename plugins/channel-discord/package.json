@@ -1,6 +1,6 @@
 {
   "name": "@opendawg/channel-discord",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Discord bot channel plugin for OpenCode — intelligent coding assistance via Discord",
   "main": "dist/app.js",
   "type": "module",
@@ -14,7 +14,14 @@
     "start": "node dist/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["discord", "bot", "ai", "opencode", "coding-assistant", "plugin"],
+  "keywords": [
+    "discord",
+    "bot",
+    "ai",
+    "opencode",
+    "coding-assistant",
+    "plugin"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^24.3.0",
