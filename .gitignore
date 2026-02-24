@@ -30,5 +30,8 @@ cli/dist/
 packages/*/dist/
 plugins/channel-*/dist/
 
-# Deploy script temp files
+# Test environment (local only, contains tokens)
 .test-env-config/
+Dockerfile.test-env
+scripts/deploy-test.sh
+scripts/test-env-entrypoint.sh
