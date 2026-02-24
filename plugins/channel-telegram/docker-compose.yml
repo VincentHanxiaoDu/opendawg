@@ -1,0 +1,35 @@
+services:
+  channel-telegram:
+    build:
+      context: ../..
+      dockerfile: plugins/channel-telegram/Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Mapped from opendawg CLI env vars (CHANNEL_TELEGRAM_*) to app env vars
+      - TELEGRAM_BOT_TOKENS=${CHANNEL_TELEGRAM_BOT_TOKEN}
+      - ALLOWED_USER_IDS=${CHANNEL_TELEGRAM_ALLOWED_USER_IDS:-}
+      - ADMIN_USER_ID=${CHANNEL_TELEGRAM_ADMIN_USER_ID:-}
+      - MESSAGE_DELETE_TIMEOUT=${CHANNEL_TELEGRAM_MESSAGE_DELETE_TIMEOUT:-0}
+      - OPENCODE_SERVER_URLS=${CHANNEL_TELEGRAM_SERVER_URLS:-}
+      - OPENCODE_SERVER_URL=${CHANNEL_TELEGRAM_SERVER_URL:-http://host.docker.internal:4096}
+      - OPENCODE_SERVER_USERNAME=${CHANNEL_TELEGRAM_SERVER_USERNAME:-}
+      - OPENCODE_SERVER_PASSWORD=${CHANNEL_TELEGRAM_SERVER_PASSWORD:-}
+      - MEDIA_TMP_LOCATION=/tmp/media/telegram
+      - VOICE_PROVIDER=${CHANNEL_TELEGRAM_VOICE_PROVIDER:-}
+      - AZURE_OPENAI_API_KEY=${CHANNEL_TELEGRAM_VOICE_API_KEY:-}
+      - AZURE_OPENAI_ENDPOINT=${CHANNEL_TELEGRAM_VOICE_ENDPOINT:-}
+      - AZURE_OPENAI_API_VERSION=${CHANNEL_TELEGRAM_VOICE_API_VERSION:-2024-06-01}
+      - AZURE_VOICE_STT_DEPLOYMENT=${CHANNEL_TELEGRAM_VOICE_STT_DEPLOYMENT:-whisper}
+      - AZURE_VOICE_TTS_DEPLOYMENT=${CHANNEL_TELEGRAM_VOICE_TTS_DEPLOYMENT:-tts}
+      - VOICE_TTS_VOICE=${CHANNEL_TELEGRAM_VOICE_TTS_VOICE:-alloy}
+    volumes:
+      - channel_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: on-failure
+
+volumes:
+  channel_data:
