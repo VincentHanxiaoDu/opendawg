@@ -7,6 +7,11 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export interface ServerConfig {
+  port: number;
+  hostname: string;
+}
+
 export interface PluginConfig {
   enabled: boolean;
   execution_mode?: 'docker' | 'native';
@@ -14,6 +19,7 @@ export interface PluginConfig {
 }
 
 export interface OpendawgConfig {
+  server: ServerConfig;
   plugins: Record<string, PluginConfig>;
 }
 
@@ -103,6 +109,13 @@ export function resolveVaultRefs(config: any): any {
 }
 
 /**
+ * Get the server config section with defaults applied.
+ */
+export function getServerConfig(config: OpendawgConfig): ServerConfig {
+  return config.server;
+}
+
+/**
  * Get the config block for a specific plugin, returning a sensible default
  * if the plugin isn't mentioned in the config at all.
  */
@@ -128,8 +141,13 @@ export function getGlobalConfigFile(): string {
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
+const DEFAULT_SERVER_CONFIG: ServerConfig = {
+  port: 4096,
+  hostname: '127.0.0.1',
+};
+
 function emptyConfig(): OpendawgConfig {
-  return { plugins: {} };
+  return { server: { ...DEFAULT_SERVER_CONFIG }, plugins: {} };
 }
 
 /**
@@ -154,6 +172,18 @@ function loadYamlFileSync(filePath: string): Record<string, any> {
 function normalizeRawConfig(raw: Record<string, any>): OpendawgConfig {
   const config = emptyConfig();
 
+  // Server section
+  if (raw.server && typeof raw.server === 'object') {
+    const s = raw.server;
+    if (typeof s.port === 'number' && Number.isInteger(s.port)) {
+      config.server.port = s.port;
+    }
+    if (typeof s.hostname === 'string' && s.hostname.length > 0) {
+      config.server.hostname = s.hostname;
+    }
+  }
+
+  // Plugins section
   if (raw.plugins && typeof raw.plugins === 'object') {
     for (const [name, pluginRaw] of Object.entries(raw.plugins)) {
       const p = pluginRaw as any;
@@ -173,6 +203,9 @@ function normalizeRawConfig(raw: Record<string, any>): OpendawgConfig {
  */
 function mergeConfigs(base: OpendawgConfig, override: OpendawgConfig): OpendawgConfig {
   const merged = emptyConfig();
+
+  // Merge server config (override wins for each field)
+  merged.server = { ...base.server, ...override.server };
 
   // Combine all plugin names from both
   const allPlugins = new Set([...Object.keys(base.plugins), ...Object.keys(override.plugins)]);
@@ -210,6 +243,18 @@ function mergeConfigs(base: OpendawgConfig, override: OpendawgConfig): OpendawgC
  *   OPENDAWG_PLUGIN_<NAME>_EXECUTION_MODE=docker/native
  */
 function applyEnvOverrides(config: OpendawgConfig): OpendawgConfig {
+  // Server env overrides
+  const envPort = process.env[`${ENV_PREFIX}SERVER_PORT`];
+  if (envPort !== undefined) {
+    const parsed = parseInt(envPort, 10);
+    if (!Number.isNaN(parsed)) config.server.port = parsed;
+  }
+  const envHostname = process.env[`${ENV_PREFIX}SERVER_HOSTNAME`];
+  if (envHostname !== undefined && envHostname.length > 0) {
+    config.server.hostname = envHostname;
+  }
+
+  // Plugin env overrides
   const pluginPrefix = `${ENV_PREFIX}PLUGIN_`;
 
   for (const [envKey, envValue] of Object.entries(process.env)) {

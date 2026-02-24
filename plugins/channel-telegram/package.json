@@ -1,6 +1,6 @@
 {
   "name": "@opendawg/channel-telegram",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Telegram bot channel plugin for OpenCode — intelligent coding assistance via Telegram",
   "main": "dist/app.js",
   "bin": {
@@ -19,7 +19,14 @@
     "watch": "tsc --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["telegram", "bot", "ai", "opencode", "coding-assistant", "plugin"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "ai",
+    "opencode",
+    "coding-assistant",
+    "plugin"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/archiver": "^6.0.3",

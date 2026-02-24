@@ -51,7 +51,29 @@
 #   opendawg enable graphiti-memory
 #   opendawg disable graphiti-memory
 #
+# ─── Server Configuration ────────────────────────────────────────────
+#
+# The `server` section configures the opencode server that the CLI and
+# channel plugins connect to. Edit it here or use:
+#
+#   opendawg configure server
+#   opendawg configure server --port=4096 --hostname=127.0.0.1
+#
+# Environment variable overrides:
+#   OPENDAWG_SERVER_PORT=4096
+#   OPENDAWG_SERVER_HOSTNAME=127.0.0.1
+#
 # ======================================================================
+
+# opencode server bind settings
+server:
+  # Port the opencode server listens on
+  port: 4096
+
+  # Hostname/IP to bind to.
+  # Use 127.0.0.1 (default) when behind tailscale serve or a reverse proxy.
+  # Use 0.0.0.0 to bind all interfaces (may conflict with tailscale serve).
+  hostname: "127.0.0.1"
 
 plugins:
 

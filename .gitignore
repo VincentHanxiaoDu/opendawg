@@ -29,3 +29,6 @@ openspec/
 cli/dist/
 packages/*/dist/
 plugins/channel-*/dist/
+
+# Deploy script temp files
+.test-env-config/
