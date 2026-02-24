@@ -9,6 +9,7 @@ Thumbs.db
 # Node
 node_modules/
 dist/
+package-lock.json
 
 # OpenDawg local state
 .opendawg/
@@ -23,3 +24,14 @@ dist/
 openspec/
 .opencode/**/openspec*
 .opencode/**/opsx*
+
+# Build artifacts
+cli/dist/
+packages/*/dist/
+plugins/channel-*/dist/
+
+# Test environment (local only, contains tokens)
+.test-env-config/
+Dockerfile.test-env
+scripts/deploy-test.sh
+scripts/test-env-entrypoint.sh

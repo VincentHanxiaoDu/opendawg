@@ -1,0 +1,34 @@
+services:
+  channel-discord:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: "host"
+    environment:
+      - DISCORD_BOT_TOKEN=${PLUGIN_BOT_TOKEN}
+      - DISCORD_APP_ID=${PLUGIN_APP_ID:-}
+      - ALLOWED_USER_IDS=${PLUGIN_ALLOWED_USER_IDS:-}
+      - ADMIN_USER_ID=${PLUGIN_ADMIN_USER_ID:-}
+      - MESSAGE_DELETE_TIMEOUT=${PLUGIN_MESSAGE_DELETE_TIMEOUT:-0}
+      - OPENCODE_SERVER_URLS=${PLUGIN_SERVER_URLS:-}
+      - OPENCODE_SERVER_URL=${PLUGIN_SERVER_URL:-http://localhost:4096}
+      - OPENCODE_SERVER_USERNAME=${PLUGIN_SERVER_USERNAME:-}
+      - OPENCODE_SERVER_PASSWORD=${PLUGIN_SERVER_PASSWORD:-}
+      - MEDIA_TMP_LOCATION=${PLUGIN_MEDIA_TMP_LOCATION:-/tmp/media/discord}
+      - VOICE_PROVIDER=${PLUGIN_VOICE_PROVIDER:-}
+      - AZURE_OPENAI_API_KEY=${PLUGIN_AZURE_VOICE_API_KEY:-}
+      - AZURE_OPENAI_ENDPOINT=${PLUGIN_AZURE_VOICE_ENDPOINT:-}
+      - AZURE_OPENAI_API_VERSION=${PLUGIN_AZURE_VOICE_API_VERSION:-2024-06-01}
+      - AZURE_VOICE_STT_DEPLOYMENT=${PLUGIN_AZURE_VOICE_STT_DEPLOYMENT:-whisper}
+      - AZURE_VOICE_TTS_DEPLOYMENT=${PLUGIN_AZURE_VOICE_TTS_DEPLOYMENT:-tts}
+      - VOICE_TTS_VOICE=${PLUGIN_VOICE_TTS_VOICE:-alloy}
+    volumes:
+      - channel_discord_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    restart: on-failure
+
+volumes:
+  channel_discord_data:

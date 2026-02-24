@@ -1,0 +1,78 @@
+name: channel-discord
+version: 0.1.0
+description: Discord bot connector for opencode
+category: channel
+
+requires:
+  system: [docker]
+
+config:
+  schema:
+    bot_token:
+      type: string
+      secret: true
+      required: true
+      description: Discord bot token from Developer Portal
+    app_id:
+      type: string
+      required: true
+      description: Discord application ID
+    allowed_user_ids:
+      type: string
+      description: Comma-separated Discord user IDs allowed to use the bot
+    admin_user_id:
+      type: string
+      description: Admin user ID for DM notifications
+    message_delete_timeout:
+      type: integer
+      default: 0
+      description: Auto-delete bot messages after N ms (0 = disabled)
+    server_urls:
+      type: string
+      description: "Comma-separated opencode server URLs (format: url|name|user|pass)"
+    server_url:
+      type: string
+      default: "http://localhost:4096"
+      description: Default opencode server URL
+    server_username:
+      type: string
+      description: HTTP Basic Auth username for opencode server
+    server_password:
+      type: string
+      secret: true
+      description: HTTP Basic Auth password for opencode server
+    media_dir:
+      type: string
+      description: Directory for uploaded media files
+    voice_provider:
+      type: string
+      description: Voice provider (azure, openai, google)
+    voice_api_key:
+      type: string
+      secret: true
+      description: Voice API key
+    voice_endpoint:
+      type: string
+      description: Voice API endpoint
+    voice_api_version:
+      type: string
+      default: "2024-06-01"
+      description: Voice API version
+    voice_stt_deployment:
+      type: string
+      default: whisper
+      description: STT model deployment name
+    voice_tts_deployment:
+      type: string
+      default: tts
+      description: TTS model deployment name
+    voice_tts_voice:
+      type: string
+      default: alloy
+      description: TTS voice name
+
+execution:
+  modes: [docker]
+  default: docker
+  docker:
+    compose: docker-compose.yml

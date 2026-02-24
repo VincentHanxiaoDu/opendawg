@@ -1,0 +1,17 @@
+{
+  "name": "@opendawg/monorepo",
+  "version": "0.4.0",
+  "private": true,
+  "workspaces": [
+    "cli",
+    "packages/*",
+    "plugins/channel-telegram",
+    "plugins/channel-discord"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:cli": "npm run build -w cli",
+    "build:core": "npm run build -w @opendawg/channel-core",
+    "clean": "npm run clean --workspaces --if-present"
+  }
+}

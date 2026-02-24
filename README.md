@@ -1,15 +1,15 @@
 # OpenDawg
 
-OpenDawg is an infrastructure layer for running [OpenCode](https://opencode.ai) as a headless server with Docker-managed services and messaging channels.
+OpenDawg is a plugin-based infrastructure layer for running [OpenCode](https://opencode.ai) as a headless server with composable services, messaging channels, and AI agent tooling.
 
 ## Architecture
 
 ```
-Telegram / other channels
+Telegram / Discord / other channels
         │
         ▼
 ┌─────────────────┐     ┌──────────────┐     ┌──────────────┐
-│ channel-telegram│────▶│ opencode     │────▶│ graphiti     │
+│ channel plugins │────▶│ opencode     │────▶│ graphiti     │
 │ (Docker)        │     │ serve :4096  │     │ (Docker)     │
 └─────────────────┘     └──────────────┘     └──────┬───────┘
                                                      │
@@ -22,52 +22,145 @@ Telegram / other channels
 ## Quick Start
 
 ```bash
-# 1. Copy and fill in your environment variables
-cp .env.example .env
+# 1. Install the CLI
+npm install -g @opendawg/cli
 
-# 2. Start everything (opencode server + all Docker services)
-./opencode-server.sh --start-all
+# 2. Install and configure plugins
+opendawg install graphiti-memory
+opendawg configure graphiti-memory
+
+opendawg install channel-telegram
+opendawg configure channel-telegram
+
+# 3. Start services
+opendawg start
 ```
 
-## Services
+### Migrating from .env
 
-| Service | Flag | Description |
-|---------|------|-------------|
-| **opencode serve** | *(always runs)* | Headless AI coding server on port 4096 |
-| **channel-telegram** | `--channel=telegram` | Telegram bot bridge (pure HTTP client) |
-| **graphiti + neo4j** | `--graphiti` | Knowledge graph for long-term memory |
-| **config-cli** | `--config-cli` | Encrypted vault for secrets |
+If you have an existing `.env` file:
 
-Use `--start-all` to launch all Docker services at once.
+```bash
+opendawg migrate
+```
 
-All Docker services must pass health checks before `opencode serve` starts.
+This converts your `.env` variables to the new YAML config format automatically.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `opendawg list` | Show all available plugins |
+| `opendawg install <plugin>` | Install a plugin |
+| `opendawg uninstall <plugin>` | Uninstall a plugin |
+| `opendawg configure <plugin>` | Interactive configuration wizard |
+| `opendawg configure <plugin> --key=value` | Non-interactive configuration |
+| `opendawg start [plugins...]` | Start plugin services |
+| `opendawg stop [plugins...]` | Stop plugin services |
+| `opendawg status [plugin]` | Show plugin status |
+| `opendawg migrate` | Convert .env to YAML config |
+| `opendawg --help` | Show help |
+
+## Plugins
+
+### Core
+| Plugin | Description | Execution |
+|--------|-------------|-----------|
+| **config-cli** | Encrypted vault for secrets (AES-256-CBC) | Docker / Native |
+
+### Skills
+| Plugin | Description | Execution |
+|--------|-------------|-----------|
+| **graphiti-memory** | Long-term memory via knowledge graph (Neo4j + LLM) | Docker |
+| **cron-scheduler** | Distributed cron scheduling via Cronicle | Native |
+| **tmux-tty** | Isolated TTY sessions for interactive tools | Native |
+| **opendawg-agent** | Spawn and manage opencode instances | Native |
+| **mcp-cli** | On-demand MCP server access via CLI | Native |
+| **openspec** | Spec-driven development framework | Native |
+
+### Channels
+| Plugin | Description | Execution |
+|--------|-------------|-----------|
+| **channel-telegram** | Telegram bot connector | Docker |
+| **channel-discord** | Discord bot connector | Docker |
 
 ## Configuration
 
-See [`.env.example`](.env.example) for all available environment variables.
+Configuration uses hierarchical YAML with scoped plugin sections:
 
-### Telegram Channel
+```
+~/.opendawg/config.yaml    (global user-level defaults)
+  ↓ overrides
+./opendawg.yaml             (project-level config)
+  ↓ overrides
+CLI flags / env vars         (runtime overrides)
+```
 
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Get your numeric user ID (not username)
-3. Set in `.env`:
-   ```
-   TELEGRAM_BOT_TOKEN=your-bot-token
-   TELEGRAM_ALLOWED_USER_IDS=your-user-id
-   ADMIN_USER_ID=your-user-id
-   ```
+### Example `opendawg.yaml`
+
+```yaml
+plugins:
+  graphiti-memory:
+    enabled: true
+    execution_mode: docker
+    config:
+      port: 8000
+      azure_openai_api_key: "${vault:azure_openai_api_key}"
+      azure_openai_endpoint: "${vault:azure_openai_endpoint}"
+
+  channel-telegram:
+    enabled: true
+    execution_mode: docker
+    config:
+      bot_token: "${vault:telegram_bot_token}"
+      allowed_user_ids: "123456,789012"
+      server_url: "http://localhost:4096"
+```
+
+Secrets are stored in the config-cli vault and referenced as `${vault:key_name}`.
+
+See [`opendawg.yaml.example`](opendawg.yaml.example) for full documentation of all options.
 
 ## Project Structure
 
 ```
-opencode-server.sh          # Main entry point — bootstraps and launches opencode serve
-docker-compose.yml          # All Docker services (profiles: graphiti, config-cli, telegram)
-.env.example                # Environment variable template
+opendawg/
+├── cli/                    # @opendawg/cli — unified CLI tool
+├── packages/
+│   └── channel-core/       # @opendawg/channel-core — shared channel library
+├── plugins/                # All plugins
+│   ├── config-cli/         # Core: encrypted vault
+│   ├── graphiti-memory/    # Skill: knowledge graph
+│   ├── cron-scheduler/     # Skill: cron scheduling
+│   ├── tmux-tty/           # Skill: TTY sessions
+│   ├── opendawg-agent/     # Skill: agent spawning
+│   ├── mcp-cli/            # Skill: MCP access
+│   ├── openspec/           # Skill: spec-driven dev
+│   ├── channel-telegram/   # Channel: Telegram
+│   └── channel-discord/    # Channel: Discord
+├── .opencode/              # AI agent configuration
+├── opendawg.yaml           # Project plugin config
+└── scripts/                # Setup scripts
+```
 
-channel/
-  telegram/                 # Patched opencode-telegram (pure client, no auto-spawn)
+Each plugin contains:
+- `plugin.yaml` — manifest with metadata, dependencies, config schema, execution modes
+- `ai/SKILL.md` — AI agent instructions
+- `scripts/` — lifecycle hooks (install, configure, health)
+- `docker-compose.yml` — Docker service definitions (if applicable)
 
-Dockerfile.channel-telegram # Docker build for Telegram channel
-Dockerfile.config-cli       # Docker build for config-cli vault
-graphiti-config.yaml        # Graphiti knowledge graph configuration
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Build all packages
+npm run build
+
+# Build CLI only
+npm run build:cli
+
+# Link CLI for local development
+cd cli && npm link
 ```

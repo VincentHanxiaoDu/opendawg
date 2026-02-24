@@ -1,0 +1,22 @@
+name: mcp-cli
+version: 1.0.0
+description: >
+  Use MCP servers on-demand via the mcp CLI tool — discover tools, resources, and
+  prompts without polluting context with pre-loaded MCP integrations.
+category: skill
+
+execution:
+  modes:
+    - native
+  default: native
+
+system_deps:
+  native: []
+
+requires_plugins: []
+
+config:
+  schema: {}
+
+ai:
+  skill_file: ai/SKILL.md

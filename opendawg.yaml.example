@@ -1,0 +1,242 @@
+# opendawg.yaml.example — Full reference configuration
+#
+# Copy this file to opendawg.yaml and edit to taste:
+#   cp opendawg.yaml.example opendawg.yaml
+#
+# ─── Overview ──────────────────────────────────────────────────────────
+#
+# This file declares which plugins are active and how they are configured.
+# Each plugin entry has:
+#
+#   enabled:         bool   — Whether the plugin is loaded at startup.
+#   execution_mode:  string — How the plugin runs:
+#                              "docker"  → managed via docker compose
+#                              "native"  → runs directly on the host
+#   config:          map    — Plugin-specific key/value settings.
+#
+# ─── Vault References ─────────────────────────────────────────────────
+#
+# Sensitive values should NOT be stored in plain text. Use vault references:
+#
+#   ${vault:KEY_NAME}
+#
+# At startup, `opendawg start` resolves these by querying config-cli:
+#
+#   config-cli get KEY_NAME
+#
+# To store a secret:
+#   config-cli set neo4j_password "my-secret"
+#
+# To list all stored keys:
+#   config-cli list
+#
+# If config-cli is not available, the literal string "${vault:...}" is left
+# as-is and the plugin should fall back to environment variables or .env.
+#
+# ─── Environment Variable Fallback ────────────────────────────────────
+#
+# For every config key, an equivalent environment variable is also checked
+# (uppercased, prefixed by plugin name). For example:
+#
+#   plugins.graphiti-memory.config.neo4j_password
+#     → env: GRAPHITI_MEMORY_NEO4J_PASSWORD
+#     → or:  NEO4J_PASSWORD  (legacy compat)
+#
+# Priority: vault reference > environment variable > default in this file.
+#
+# ─── Enabling Plugins ─────────────────────────────────────────────────
+#
+# Set `enabled: true` on any plugin you want active. Or use the CLI:
+#
+#   opendawg enable graphiti-memory
+#   opendawg disable graphiti-memory
+#
+# ─── Server Configuration ────────────────────────────────────────────
+#
+# The `server` section configures the opencode server that the CLI and
+# channel plugins connect to. Edit it here or use:
+#
+#   opendawg configure server
+#   opendawg configure server --port=4096 --hostname=127.0.0.1
+#
+# Environment variable overrides:
+#   OPENDAWG_SERVER_PORT=4096
+#   OPENDAWG_SERVER_HOSTNAME=127.0.0.1
+#
+# ======================================================================
+
+# opencode server bind settings
+server:
+  # Port the opencode server listens on
+  port: 4096
+
+  # Hostname/IP to bind to.
+  # Use 127.0.0.1 (default) when behind tailscale serve or a reverse proxy.
+  # Use 0.0.0.0 to bind all interfaces (may conflict with tailscale serve).
+  hostname: "127.0.0.1"
+
+plugins:
+
+  # ┌─────────────────────────────────────────────────────────────────┐
+  # │  CORE                                                           │
+  # └─────────────────────────────────────────────────────────────────┘
+
+  config-cli:
+    # Encrypted key-value vault for storing secrets (API keys, tokens, etc.)
+    # Required by other plugins that use ${vault:...} references.
+    enabled: false
+    execution_mode: docker    # Runs as a Docker container on the specified port
+    config:
+      # HTTP port the config-cli server listens on
+      port: 9100
+
+      # Master token used to authenticate with the vault
+      # Store this token securely — it encrypts/decrypts all other secrets
+      # Generate one with: openssl rand -hex 32
+      token: "${vault:config_cli_token}"
+
+  # ┌─────────────────────────────────────────────────────────────────┐
+  # │  SKILLS                                                         │
+  # └─────────────────────────────────────────────────────────────────┘
+
+  graphiti-memory:
+    # Long-term knowledge graph memory powered by Graphiti + Neo4j.
+    # Persists facts, relationships, and context across sessions.
+    # Requires: config-cli (for vault secrets), Docker (for Neo4j)
+    enabled: false
+    execution_mode: docker
+    config:
+      # Graphiti MCP server port
+      port: 8000
+
+      # Neo4j database ports
+      neo4j_http_port: 7474       # Browser UI at http://localhost:7474
+      neo4j_bolt_port: 7687       # Bolt protocol for driver connections
+
+      # Neo4j authentication
+      neo4j_password: "${vault:neo4j_password}"
+
+      # Azure OpenAI — used by Graphiti for LLM extraction and embeddings
+      azure_openai_api_key: "${vault:azure_openai_api_key}"
+      azure_openai_endpoint: "${vault:azure_openai_endpoint}"           # e.g. https://your-resource.openai.azure.com/
+      azure_openai_deployment: gpt-4.1                                   # LLM model deployment name
+      azure_openai_api_version: "2025-03-01-preview"
+      azure_openai_embeddings_deployment: text-embedding-3-large         # Embedding model deployment name
+      azure_openai_embeddings_endpoint: "${vault:azure_openai_embeddings_endpoint}"
+
+  cron-scheduler:
+    # Distributed cron/task scheduler powered by Cronicle.
+    # Schedule recurring or one-shot jobs, with web UI and API.
+    enabled: false
+    execution_mode: native    # Runs directly on the host (not Docker)
+    config:
+      # Cronicle web UI / API port
+      port: 3012
+
+      # Base URL for API calls
+      base_url: "http://localhost:3012"
+
+      # API key for programmatic access (Cronicle admin → API Keys)
+      api_key: "${vault:cronicle_api_key}"
+
+      # Shared secret for server-to-server auth
+      secret: "${vault:cronicle_secret}"
+
+      # Admin panel password
+      admin_password: "${vault:cronicle_admin_password}"
+
+  tmux-tty:
+    # Provides isolated tmux sessions for commands that need a TTY.
+    # Used for interactive CLIs, REPLs, editors (vim, nano), git rebase -i, etc.
+    # No external dependencies — uses the host tmux installation.
+    enabled: false
+    execution_mode: native
+
+  opendawg-agent:
+    # Spawn and manage fully-configured opencode CLI sessions.
+    # Can bootstrap environments, install skills, and set up auth.
+    # Depends on: tmux-tty (for session management)
+    enabled: false
+    execution_mode: native
+
+  mcp-cli:
+    # On-demand MCP server access via the `mcp` CLI tool.
+    # Discover and call MCP tools/resources without pre-loading servers.
+    # Keeps the agent context clean by loading tools only when needed.
+    enabled: false
+    execution_mode: native
+
+  openspec:
+    # Spec-driven development framework for complex coding tasks.
+    # Provides structured planning: explore → propose → spec → design → apply → verify.
+    # Use for architectural changes, large refactors, multi-component features.
+    enabled: false
+    execution_mode: native
+
+  # ┌─────────────────────────────────────────────────────────────────┐
+  # │  CHANNELS                                                       │
+  # └─────────────────────────────────────────────────────────────────┘
+
+  channel-telegram:
+    # Telegram bot bridge — forwards messages between Telegram and opencode.
+    # Requires: TELEGRAM_BOT_TOKEN from @BotFather
+    enabled: false
+    execution_mode: docker
+    config:
+      # Telegram bot token (from @BotFather)
+      bot_token: "${vault:telegram_bot_token}"
+
+      # Comma-separated Telegram user IDs allowed to interact with the bot
+      # Leave empty to allow all users (not recommended for production)
+      allowed_user_ids: ""
+
+      # Admin user ID — receives admin-level notifications
+      admin_user_id: ""
+
+      # Auto-delete bot messages after N seconds (0 = disabled)
+      message_delete_timeout: 0
+
+      # Comma-separated opencode server URLs for multi-server setups
+      # Format: "url|name|username|password" (fields after url are optional)
+      # Example: "http://host1:4096|Home,http://host2:4096|Work"
+      server_urls: ""
+
+      # Single opencode server URL (used when server_urls is empty)
+      # On macOS Docker: use http://host.docker.internal:4096
+      server_url: "http://localhost:4096"
+
+      # Host directory for media files (photos, documents, voice notes)
+      # Shared between the container and the opencode agent
+      media_dir: "~/opendawg/media/telegram"
+
+  channel-discord:
+    # Discord bot bridge — forwards messages between Discord and opencode.
+    # Requires: bot token + app ID from Discord Developer Portal
+    enabled: false
+    execution_mode: docker
+    config:
+      # Discord bot token (Developer Portal → Bot → Token)
+      bot_token: "${vault:discord_bot_token}"
+
+      # Discord application ID (Developer Portal → General Information)
+      app_id: ""
+
+      # Comma-separated Discord user IDs allowed to use the bot
+      # Leave empty to allow all users (not recommended for production)
+      allowed_user_ids: ""
+
+      # Admin user ID — receives DM notifications about unauthorized access
+      admin_user_id: ""
+
+      # Auto-delete bot messages after N milliseconds (0 = disabled)
+      message_delete_timeout: 0
+
+      # Comma-separated opencode server URLs for multi-server setups
+      # Same format as channel-telegram.server_urls
+      server_urls: ""
+
+      # Single opencode server URL (used when server_urls is empty)
+      server_url: "http://localhost:4096"
+
+      # Host directory for media files
+      media_dir: "~/opendawg/media/discord"
