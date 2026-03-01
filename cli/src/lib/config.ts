@@ -10,6 +10,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 export interface ServerConfig {
   port: number;
   hostname: string;
+  yolo?: boolean;
 }
 
 export interface PluginConfig {

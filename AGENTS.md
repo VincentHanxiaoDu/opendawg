@@ -74,9 +74,17 @@ The main agent context is expensive. Don't waste it on exploratory or mechanical
 
 ## Memory — Continuously Learn and Recall
 
+> ⚠️ **MANDATORY BEFORE EVERY TASK**: You MUST check memory AND available skills before executing any task. Never skip this step.
+
 Use **graphiti-memory** to persist and retrieve knowledge across sessions.
 
-**Store facts as you discover them** — don't batch, don't defer:
+**Before EVERY task execution**:
+1. **Search memory** for relevant content: `graphiti-agent search "<task related query>"`
+2. **Check available skills** that could help: Review `.opencode/skills/` directory for relevant skills
+
+```bash
+graphiti-agent remember "<fact>" --source <source-type> --metadata "key=value"
+```
 - Execution environment: machine, OS, architecture, network, paths, installed tools, versions
 - Scripts: locations, what they do, required args, gotchas
 - Debugging insights: root causes, workarounds, fixes
@@ -101,8 +109,8 @@ graphiti-agent search "<what you need to know>"
 
 **NEVER execute operations you don't fully understand.** Follow this escalation strictly:
 
-1. **Search memory** — `graphiti-agent search "<query>"` — maybe you've seen this before
-2. **Search the web** — Use WebFetch / google search tools to look up docs, APIs, error messages
+1. **Search memory** — `graphiti-agent search "<query>"` — maybe you've seen it before
+2. **Search the web** — Use WebFetch / WebSearch tools to look up docs, APIs, error messages
 3. **Ask the user** — Only after both memory and web fail to provide clarity
 
 This order is non-negotiable. Do not guess. Do not run commands hoping they'll work. Do not assume based on partial understanding. Understand first, act second.
