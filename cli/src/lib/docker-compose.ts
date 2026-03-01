@@ -40,7 +40,12 @@ export function collectComposeFiles(plugins: PluginInfo[], pluginsDir: string): 
     if (plugin.state.executionMode !== 'docker') continue;
     if (!plugin.state.enabled) continue;
 
-    const composePath = plugin.manifest.execution?.docker?.compose;
+    // Support two plugin.yaml schema variants:
+    //   1. execution.docker.compose  (channel-discord, channel-telegram)
+    //   2. docker.compose_file        (config-cli, graphiti-memory)
+    const composePath =
+      plugin.manifest.execution?.docker?.compose ??
+      (plugin.manifest as any).docker?.compose_file;
     if (!composePath) continue;
 
     // Resolve relative to the plugin directory

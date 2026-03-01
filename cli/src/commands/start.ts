@@ -15,8 +15,80 @@ import {
 import { startNativePlugin, isPluginRunning } from '../lib/process-manager.js';
 import { info, success, warn, error, table } from '../utils/logger.js';
 import { resolve } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 
 const PLUGINS_DIR = resolve(process.cwd(), 'plugins');
+
+/**
+ * Parse a plugin's docker-compose.yml and extract all ${VAR_NAME} environment
+ * variable references (stripping :-default suffixes).
+ */
+function extractComposeEnvVars(plugin: PluginInfo): string[] {
+  const composePath =
+    plugin.manifest.execution?.docker?.compose ??
+    (plugin.manifest as any).docker?.compose_file;
+  if (!composePath) return [];
+
+  const fullPath = resolve(plugin.path, composePath);
+  if (!existsSync(fullPath)) return [];
+
+  try {
+    const content = readFileSync(fullPath, 'utf-8');
+    const varPattern = /\$\{([A-Z_][A-Z0-9_]*)(?::-[^}]*)?\}/g;
+    const vars = new Set<string>();
+    let match: RegExpExecArray | null;
+    while ((match = varPattern.exec(content)) !== null) {
+      vars.add(match[1]);
+    }
+    return [...vars];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Match an opendawg.yaml config key (e.g. "bot_token", "neo4j_password") to
+ * the env var name that the plugin's docker-compose.yml expects.
+ *
+ * Strategy:
+ *   1. Exact match: KEY uppercased matches an env var exactly → use it
+ *   2. Suffix match: an env var ends with _KEY uppercased → use it
+ *   3. Fallback: PLUGIN_NAME_KEY uppercased (the old prefix behavior)
+ */
+function matchConfigKeyToEnvVar(
+  configKey: string,
+  composeEnvVars: string[],
+  pluginName: string,
+): string {
+  const keyUpper = configKey.toUpperCase();
+
+  // 1. Exact match (e.g. config key "neo4j_password" → env var "NEO4J_PASSWORD")
+  const exact = composeEnvVars.find((v) => v === keyUpper);
+  if (exact) return exact;
+
+  // 2. Suffix match (e.g. config key "bot_token" → env var "CHANNEL_TELEGRAM_BOT_TOKEN" or "PLUGIN_BOT_TOKEN")
+  const suffixMatches = composeEnvVars.filter((v) => v.endsWith('_' + keyUpper));
+  if (suffixMatches.length === 1) return suffixMatches[0];
+
+  // If multiple suffix matches, prefer the one with the plugin name prefix
+  if (suffixMatches.length > 1) {
+    const pluginPrefix = pluginName.toUpperCase().replace(/-/g, '_');
+    const prefixed = suffixMatches.find((v) => v.startsWith(pluginPrefix + '_'));
+    if (prefixed) return prefixed;
+    return suffixMatches[0]; // take first if no plugin-prefixed match
+  }
+
+  // 3. Special case: config key "port" — look for common patterns like
+  //    GRAPHITI_PORT, CONFIG_CLI_PORT, etc.
+  if (keyUpper === 'PORT') {
+    // Look for any env var ending with _PORT that might be the main port
+    const portVars = composeEnvVars.filter((v) => v.endsWith('_PORT') && !v.includes('BOLT') && !v.includes('HTTP'));
+    if (portVars.length === 1) return portVars[0];
+  }
+
+  // 4. Fallback: prefix with plugin name (old behavior)
+  return `${pluginName.toUpperCase().replace(/-/g, '_')}_${keyUpper}`;
+}
 
 /**
  * Wait for a plugin's health check to pass with retries.
@@ -145,54 +217,67 @@ export function registerStartCommand(program: Command): void {
           }
         }
 
-        // Start docker plugins via compose up with merged fragments
-        if (dockerPlugins.length > 0) {
-          info(`Starting docker plugins: ${dockerPlugins.map((p) => p.name).join(', ')}...`);
+        // Start each docker plugin individually so failures are isolated
+        for (const plugin of dockerPlugins) {
+          info(`Starting docker plugin "${plugin.name}"...`);
 
-          // Build env map from plugin configs, resolving vault refs per-plugin
+          // Build env map from this plugin's config, resolving vault refs
           const env: Record<string, string> = {};
-          for (const plugin of dockerPlugins) {
-            const pluginCfg = config.plugins?.[plugin.name]?.config;
-            if (pluginCfg) {
-              // Resolve vault refs only for this plugin's config
-              let resolvedCfg: Record<string, any>;
-              try {
-                resolvedCfg = resolveVaultRefs(pluginCfg);
-              } catch (vaultErr) {
-                warn(`Vault resolution failed for "${plugin.name}": ${vaultErr instanceof Error ? vaultErr.message : String(vaultErr)}`);
-                warn('Using raw config values (vault references will not be resolved).');
-                resolvedCfg = pluginCfg;
-              }
-              for (const [key, value] of Object.entries(resolvedCfg)) {
-                if (value !== undefined && value !== null) {
-                  env[`${plugin.name.toUpperCase().replace(/-/g, '_')}_${key.toUpperCase()}`] = String(value);
-                }
-              }
+          const pluginCfg = config.plugins?.[plugin.name]?.config;
+          if (pluginCfg) {
+            let resolvedCfg: Record<string, any>;
+            try {
+              resolvedCfg = resolveVaultRefs(pluginCfg);
+            } catch (vaultErr) {
+              warn(`Vault resolution failed for "${plugin.name}": ${vaultErr instanceof Error ? vaultErr.message : String(vaultErr)}`);
+              warn('Using raw config values (vault references will not be resolved).');
+              resolvedCfg = pluginCfg;
+            }
+
+            // Extract env var names from the plugin's docker-compose.yml
+            const composeEnvVars = extractComposeEnvVars(plugin);
+
+            for (const [key, value] of Object.entries(resolvedCfg)) {
+              if (value === undefined || value === null) continue;
+              const envVarName = matchConfigKeyToEnvVar(key, composeEnvVars, plugin.name);
+              env[envVarName] = String(value);
             }
           }
 
-          const composeFiles = collectComposeFiles(dockerPlugins, PLUGINS_DIR);
-          if (composeFiles.length > 0) {
-            const cmd = buildComposeCommand(composeFiles, 'up', {
-              projectName: 'opendawg',
-              detach: true,
-              env,
-            });
-            const result = await runCompose(cmd, { env });
+          const composeFiles = collectComposeFiles([plugin], PLUGINS_DIR);
+          if (composeFiles.length === 0) {
+            warn(`No compose file found for "${plugin.name}". Skipping.`);
+            continue;
+          }
 
-            if (result.exitCode !== 0) {
-              error(`Docker compose up failed (exit ${result.exitCode}):`);
-              if (result.stderr) error(result.stderr);
-            } else {
-              for (const plugin of dockerPlugins) {
-                success(`"${plugin.name}" compose services started.`);
-              }
-            }
+          const cmd = buildComposeCommand(composeFiles, 'up', {
+            projectName: 'opendawg',
+            detach: true,
+            env,
+          });
+          const result = await runCompose(cmd, { env });
+
+          if (result.exitCode !== 0) {
+            error(`Failed to start "${plugin.name}" (exit ${result.exitCode}):`);
+            if (result.stderr) error(result.stderr.trim());
+          } else {
+            success(`"${plugin.name}" compose services started.`);
           }
         }
 
         // Start native plugins sequentially in dependency order
         for (const plugin of nativePlugins) {
+          // Skip skill-only plugins that have no native start command —
+          // they are loaded on-demand by the AI agent, not run as daemons
+          const startCmd = plugin.manifest.execution?.native?.start;
+          if (!startCmd) {
+            info(`"${plugin.name}" is a skill plugin (no daemon). Skipping.`);
+            // Remove from pluginsToStart so health check doesn't wait for it
+            const idx = pluginsToStart.indexOf(plugin);
+            if (idx !== -1) pluginsToStart.splice(idx, 1);
+            continue;
+          }
+
           info(`Starting native plugin "${plugin.name}"...`);
 
           // Check system deps first
@@ -220,7 +305,7 @@ export function registerStartCommand(program: Command): void {
         const results: Array<{ name: string; status: string }> = [];
 
         for (const plugin of pluginsToStart) {
-          const healthy = await waitForHealthy(plugin, 15, 2000);
+          const healthy = await waitForHealthy(plugin, 30, 2000);
           results.push({ name: plugin.name, status: healthy ? 'healthy' : 'unhealthy' });
 
           if (!healthy) {

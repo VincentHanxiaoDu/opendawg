@@ -24,6 +24,11 @@ const SERVER_SCHEMA: Record<string, ConfigFieldSchema> = {
     default: '127.0.0.1',
     description: 'Hostname/IP to bind the opencode server to',
   },
+  yolo: {
+    type: 'boolean',
+    default: false,
+    description: 'Bypass all permission prompts (YOLO mode)',
+  },
 };
 
 /**
@@ -271,9 +276,10 @@ async function configureServer(opts: { kv?: string[] }, cmd: Command): Promise<v
     return;
   }
 
-  config.server = { port: newValues.port, hostname: newValues.hostname };
+  config.server = { port: newValues.port, hostname: newValues.hostname, yolo: newValues.yolo };
   await saveProjectConfig(config);
   success('Server configured successfully.');
   info(`  port:     ${config.server.port}`);
   info(`  hostname: ${config.server.hostname}`);
+  info(`  yolo:     ${config.server.yolo ?? false}`);
 }

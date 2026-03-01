@@ -135,7 +135,7 @@ export function registerStopCommand(program: Command): void {
           try {
             const composeFiles = collectComposeFiles(dockerPlugins, PLUGINS_DIR);
             if (composeFiles.length > 0) {
-              const cmd = buildComposeCommand(composeFiles, 'down', { removeOrphans: true });
+              const cmd = buildComposeCommand(composeFiles, 'down', { projectName: 'opendawg', removeOrphans: true });
               const result = await runCompose(cmd);
 
               if (result.exitCode !== 0) {

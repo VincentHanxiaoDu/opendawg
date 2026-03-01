@@ -37,8 +37,11 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
     try {
         const sessionId = userSession.sessionId;
         const stream = userSession.stream ?? true;
+        const verbosity = userSession.verbosity ?? 1;
         const now = Date.now();
         const state = getState(sessionId);
+
+        if (verbosity < 1) return;
 
         if (state.finalizeTimeout) {
             clearTimeout(state.finalizeTimeout);

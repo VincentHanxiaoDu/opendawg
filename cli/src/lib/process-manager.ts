@@ -141,27 +141,40 @@ export async function isPluginRunning(plugin: PluginInfo): Promise<boolean> {
 
 /**
  * Check if a Docker-mode plugin has a running container.
- * Looks for containers in the "opendawg" compose project matching the plugin name.
+ * Uses Docker Compose labels to reliably match containers to plugins,
+ * avoiding false positives from partial name matching.
  */
 async function isDockerPluginRunning(pluginName: string): Promise<boolean> {
   try {
+    // Use the compose config_files label — it contains the plugin's directory
+    // path (e.g. "/path/to/plugins/graphiti-memory/docker-compose.yml"),
+    // so checking for the plugin name in that label is reliable.
     const { stdout } = await exec(
-      `docker compose --project-name opendawg ps --format json ${pluginName}`,
+      `docker ps --filter "status=running" --format "{{.Names}}\\t{{.Label \\"com.docker.compose.project.config_files\\"}}"`,
       { timeout: 10000 },
     );
     if (!stdout.trim()) return false;
 
-    // docker compose ps --format json outputs one JSON object per line
     const lines = stdout.trim().split('\n');
     for (const line of lines) {
-      try {
-        const container = JSON.parse(line);
-        const state = (container.State || '').toLowerCase();
-        if (state === 'running') return true;
-      } catch {
-        // Skip lines that aren't JSON
+      const [containerName, configFiles] = line.split('\t');
+      if (!containerName) continue;
+
+      // Primary: check if the compose config_files label contains the plugin name
+      // e.g. "graphiti-memory" in "/path/plugins/graphiti-memory/docker-compose.yml"
+      if (configFiles && configFiles.includes(`/${pluginName}/`)) {
+        return true;
+      }
+
+      // Fallback: exact slug match in container name
+      // e.g. "config-cli" matches "opendawg-config-cli-1"
+      const slug = pluginName.replace(/-/g, '[-_]?');
+      const pattern = new RegExp(`(^|[-_])${slug}([-_]|$)`, 'i');
+      if (pattern.test(containerName)) {
+        return true;
       }
     }
+
     return false;
   } catch {
     return false;
