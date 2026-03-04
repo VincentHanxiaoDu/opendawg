@@ -209,6 +209,93 @@ export class AzureVoiceProvider implements VoiceProvider {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Azure Speech Service provider (native TTS/STT — not OpenAI-compatible)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class AzureSpeechVoiceProvider implements VoiceProvider {
+    private readonly apiKey: string;
+    private readonly region: string;
+    private readonly defaultVoice: string;
+    private readonly language: string;
+
+    constructor(config: {
+        apiKey: string;
+        region: string;
+        voice?: string;
+        language?: string;
+    }) {
+        this.apiKey = config.apiKey;
+        this.region = config.region;
+        this.defaultVoice = config.voice ?? "en-US-AvaMultilingualNeural";
+        this.language = config.language ?? "en-US";
+    }
+
+    async transcribe(audioBuffer: Buffer, options?: TranscribeOptions): Promise<string> {
+        const lang = options?.language ?? this.language;
+        const url = `https://${this.region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=${lang}`;
+
+        const contentType = options?.mimeType ?? "audio/ogg; codecs=opus";
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Ocp-Apim-Subscription-Key": this.apiKey,
+                "Content-Type": contentType,
+                "Accept": "application/json",
+            },
+            body: new Uint8Array(audioBuffer),
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Azure Speech STT error ${response.status}: ${errText}`);
+        }
+
+        const result = await response.json() as { DisplayText?: string; RecognitionStatus?: string };
+        if (result.RecognitionStatus !== "Success") {
+            return "";
+        }
+        return result.DisplayText ?? "";
+    }
+
+    async synthesize(text: string, options?: SynthesizeOptions): Promise<Buffer> {
+        const voice = options?.voice ?? this.defaultVoice;
+        const url = `https://${this.region}.tts.speech.microsoft.com/cognitiveservices/v1`;
+
+        const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${this.language}'>
+  <voice name='${voice}'>${escapeXml(text)}</voice>
+</speak>`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Ocp-Apim-Subscription-Key": this.apiKey,
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
+            },
+            body: ssml,
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Azure Speech TTS error ${response.status}: ${errText}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+    }
+}
+
+function escapeXml(text: string): string {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Google Cloud provider (skeleton)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -231,7 +318,7 @@ export class GoogleVoiceProvider implements VoiceProvider {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface VoiceProviderConfig {
-    provider?: string;          // "openai" | "azure" | "google"  (default: "openai")
+    provider?: string;          // "openai" | "azure" | "azure-speech" | "google"  (default: "openai")
     // OpenAI
     openaiApiKey?: string;
     sttModel?: string;
@@ -243,6 +330,11 @@ export interface VoiceProviderConfig {
     azureApiVersion?: string;
     azureSttDeployment?: string;
     azureTtsDeployment?: string;
+    // Azure Speech Service
+    azureSpeechApiKey?: string;
+    azureSpeechRegion?: string;
+    azureSpeechVoice?: string;
+    azureSpeechLanguage?: string;
     // Google Cloud
     googleApiKey?: string;
     googleCredentialsPath?: string;
@@ -286,6 +378,26 @@ export function createVoiceProvider(config: VoiceProviderConfig): VoiceProvider 
                 sttDeployment: config.azureSttDeployment ?? process.env.AZURE_VOICE_STT_DEPLOYMENT,
                 ttsDeployment: config.azureTtsDeployment ?? process.env.AZURE_VOICE_TTS_DEPLOYMENT,
                 voice: config.ttsVoice,
+            });
+        }
+        case "azure-speech": {
+            const apiKey = config.azureSpeechApiKey ?? config.azureApiKey ?? process.env.AZURE_SPEECH_API_KEY ?? "";
+            const region = config.azureSpeechRegion ?? process.env.AZURE_SPEECH_REGION ?? "";
+            if (!apiKey) {
+                throw new Error(
+                    "Azure Speech API key is not set. Set azureSpeechApiKey or AZURE_SPEECH_API_KEY."
+                );
+            }
+            if (!region) {
+                throw new Error(
+                    "Azure Speech region is not set. Set azureSpeechRegion or AZURE_SPEECH_REGION (e.g. eastus2)."
+                );
+            }
+            return new AzureSpeechVoiceProvider({
+                apiKey,
+                region,
+                voice: config.azureSpeechVoice ?? config.ttsVoice,
+                language: config.azureSpeechLanguage,
             });
         }
         case "google": {

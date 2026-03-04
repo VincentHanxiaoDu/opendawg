@@ -80,6 +80,15 @@ export class OpenCodeBot {
                     sttModel: configService.getVoiceSttModel(),
                     ttsModel: configService.getVoiceTtsModel(),
                     ttsVoice: configService.getVoiceTtsVoice(),
+                    azureApiKey: process.env.AZURE_OPENAI_API_KEY,
+                    azureEndpoint: process.env.AZURE_OPENAI_ENDPOINT,
+                    azureApiVersion: process.env.AZURE_OPENAI_API_VERSION,
+                    azureSttDeployment: process.env.AZURE_VOICE_STT_DEPLOYMENT,
+                    azureTtsDeployment: process.env.AZURE_VOICE_TTS_DEPLOYMENT,
+                    azureSpeechApiKey: process.env.AZURE_SPEECH_API_KEY || process.env.AZURE_OPENAI_API_KEY,
+                    azureSpeechRegion: process.env.AZURE_SPEECH_REGION,
+                    azureSpeechVoice: process.env.AZURE_SPEECH_VOICE,
+                    azureSpeechLanguage: process.env.AZURE_SPEECH_LANGUAGE,
                 });
                 // Register with session.idle handler for TTS delivery
                 setIdleVoiceProvider(this.voiceProvider);

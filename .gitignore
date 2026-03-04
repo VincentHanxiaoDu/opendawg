@@ -1,6 +1,16 @@
 # Environment & secrets
 .env
+.env.*
 .env.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+secrets/
+
+# User-specific config (use opendawg.yaml.example as template)
+opendawg.yaml
 
 # OS files
 .DS_Store
@@ -20,6 +30,11 @@ package-lock.json
 # Docker
 *.log
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
 # Openspec
 openspec/
 .opencode/**/openspec*
@@ -30,8 +45,10 @@ cli/dist/
 packages/*/dist/
 plugins/channel-*/dist/
 
-# Test environment (local only, contains tokens)
+# Test / deploy scripts (should never be committed)
 .test-env-config/
 Dockerfile.test-env
-scripts/deploy-test.sh
-scripts/test-env-entrypoint.sh
+Dockerfile.uat-test
+scripts/deploy-*.sh
+scripts/test-*.sh
+uat/

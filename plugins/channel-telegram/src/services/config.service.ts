@@ -86,6 +86,7 @@ export class ConfigService {
         const hasApiKey = !!(
             process.env.OPENAI_API_KEY ||
             process.env.AZURE_OPENAI_API_KEY ||
+            process.env.AZURE_SPEECH_API_KEY ||
             process.env.GOOGLE_API_KEY ||
             process.env.GOOGLE_APPLICATION_CREDENTIALS
         );
