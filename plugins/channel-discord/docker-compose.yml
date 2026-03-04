@@ -1,8 +1,8 @@
 services:
   channel-discord:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: plugins/channel-discord/Dockerfile
     network_mode: "host"
     environment:
       - DISCORD_BOT_TOKEN=${PLUGIN_BOT_TOKEN}
