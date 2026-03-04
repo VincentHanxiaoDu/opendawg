@@ -32,6 +32,7 @@ fi
 mkdir -p "$BIN_DIR"
 
 # Make scripts executable and symlink
+chmod +x "${SCRIPT_DIR}/_cron-lib.sh"
 chmod +x "${SCRIPT_DIR}/cron-cli.sh"
 chmod +x "${SCRIPT_DIR}/cron-agent.sh"
 chmod +x "${SCRIPT_DIR}/cron-client.sh"

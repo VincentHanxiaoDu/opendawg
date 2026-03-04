@@ -11,6 +11,9 @@ execution:
     - native
     - docker
   default: native
+  native:
+    start: scripts/cron-cli.sh start
+    stop: scripts/cron-cli.sh stop
 
 system_deps:
   native: []
@@ -47,6 +50,7 @@ config:
 
 hooks:
   post_install: scripts/install.sh
+  health_check: scripts/cron-cli.sh health
 
 ai:
   skill_file: ai/SKILL.md
