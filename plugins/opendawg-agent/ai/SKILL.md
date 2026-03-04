@@ -18,10 +18,38 @@ Two scripts, two concerns:
 
 | Priority | Method | When to use |
 |----------|--------|-------------|
-| **1. SSH direct** | `ssh host "cd /project && bash .../opendawg-agent.sh ..."` | SSH available, simple/single-turn tasks, good network |
-| **2. tmux-tty** | `tmux-wrapper.sh` + `opendawg-agent.sh` | No reliable SSH, need TTY, multi-turn interaction, or poor network (tmux survives disconnects) |
+| **1. opencode serve (HTTP API)** | `opencode serve` on target, interact via REST API / `@opencode-ai/sdk` | Network available, opencode server deployed. Best for automation — structured API, no SSH needed. |
+| **2. SSH / other tools + opencode CLI** | `ssh host "cd /project && bash .../opendawg-agent.sh ..."` | No opencode server, but SSH available. Direct CLI execution on remote machine. |
+| **3. tmux-tty + opencode CLI** | `tmux-wrapper.sh` + `opendawg-agent.sh` | No network / no SSH. Need TTY persistence, multi-turn interaction, or network resilience (tmux survives disconnects). |
 
-**SSH is preferred** for straightforward invocations — no tmux overhead, direct stdout capture. Fall back to tmux for persistent sessions, TTY interaction, or network resilience.
+**opencode serve is preferred** — pure HTTP, full session management, no SSH overhead. Fall back to SSH+CLI when no server is deployed, and to tmux-tty only when network is unreliable or unavailable.
+
+### opencode serve quick reference
+
+Start server on target: `opencode serve` (default port 4096). Key REST endpoints:
+
+```bash
+SERVER="http://localhost:4096"
+
+# Create session
+curl -s -X POST "$SERVER/session" -H "Content-Type: application/json" -d '{"title":"my-task"}'
+
+# Send prompt (async, returns immediately)
+curl -s -X POST "$SERVER/session/$SID/prompt_async" \
+  -H "Content-Type: application/json" \
+  -d '{"parts":[{"type":"text","text":"/opendawg implement auth"}]}'
+
+# Stream events (SSE) — watch for session.idle (done), message.part.updated (output)
+curl -N "$SERVER/event"
+
+# Get messages
+curl -s "$SERVER/session/$SID/message?limit=20"
+
+# Abort session
+curl -s -X POST "$SERVER/session/$SID/abort"
+```
+
+Optional Basic Auth: set `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`, add `-H "Authorization: Basic $(echo -n user:pass | base64)"`.
 
 ## CLI vs TUI Mode
 

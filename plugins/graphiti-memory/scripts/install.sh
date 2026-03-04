@@ -50,6 +50,7 @@ fi
 mkdir -p "$BIN_DIR"
 
 # Make scripts executable and symlink
+chmod +x "${SCRIPT_DIR}/_graphiti-lib.sh"
 chmod +x "${SCRIPT_DIR}/graphiti-cli.sh"
 chmod +x "${SCRIPT_DIR}/graphiti-agent.sh"
 ln -sf "${SCRIPT_DIR}/graphiti-cli.sh" "${BIN_DIR}/graphiti-cli"

@@ -12,7 +12,7 @@ REPO_URL=""
 REPO_BRANCH="main"
 CONFIG_CLI_ENDPOINT=""
 CONFIG_CLI_TOKEN=""
-GRAPHITI_GROUP_ID="opendawg"
+GRAPHITI_GROUP_ID="${GRAPHITI_GROUP_ID:-opendawg-$(hostname -s)}"
 GRAPHITI_MODEL=""
 
 show_help() {
