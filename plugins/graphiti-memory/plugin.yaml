@@ -10,9 +10,6 @@ execution:
   modes:
     - docker
   default: docker
-  docker:
-    start: scripts/graphiti-cli.sh start
-    stop: scripts/graphiti-cli.sh stop
 
 system_deps:
   docker:
