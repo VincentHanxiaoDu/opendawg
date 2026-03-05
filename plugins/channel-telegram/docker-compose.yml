@@ -3,8 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: plugins/channel-telegram/Dockerfile
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: host
     environment:
       # Mapped from opendawg CLI env vars (CHANNEL_TELEGRAM_*) to app env vars
       - TELEGRAM_BOT_TOKENS=${CHANNEL_TELEGRAM_BOT_TOKEN}
@@ -12,7 +11,7 @@ services:
       - ADMIN_USER_ID=${CHANNEL_TELEGRAM_ADMIN_USER_ID:-}
       - MESSAGE_DELETE_TIMEOUT=${CHANNEL_TELEGRAM_MESSAGE_DELETE_TIMEOUT:-0}
       - OPENCODE_SERVER_URLS=${CHANNEL_TELEGRAM_SERVER_URLS:-}
-      - OPENCODE_SERVER_URL=${CHANNEL_TELEGRAM_SERVER_URL:-http://host.docker.internal:4096}
+      - OPENCODE_SERVER_URL=${CHANNEL_TELEGRAM_SERVER_URL:-http://127.0.0.1:4096}
       - OPENCODE_SERVER_USERNAME=${CHANNEL_TELEGRAM_SERVER_USERNAME:-}
       - OPENCODE_SERVER_PASSWORD=${CHANNEL_TELEGRAM_SERVER_PASSWORD:-}
       - MEDIA_TMP_LOCATION=/tmp/media/telegram
