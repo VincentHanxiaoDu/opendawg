@@ -457,16 +457,22 @@ cmd_active() {
 }
 
 cmd_health() {
-  local result
-  result=$(curl -sf "${CRONICLE_URL}/api/app/get_schedule/v1?limit=1" \
-    -H "X-API-Key: ${CRONICLE_API_KEY}" 2>&1) || {
-    echo "UNHEALTHY: Cannot reach Cronicle at ${CRONICLE_URL}" >&2
-    return 1
-  }
-  echo "HEALTHY: Cronicle is running at ${CRONICLE_URL}"
-  local job_count
-  job_count=$(echo "$result" | jq -r '.list.length // 0')
-  echo "Jobs: ${job_count}"
+  # Try unauthenticated ping first (works without API key)
+  if curl -sf --max-time 5 "${CRONICLE_URL}/api/app/ping" >/dev/null 2>&1; then
+    echo "HEALTHY: Cronicle is running at ${CRONICLE_URL}"
+    # If API key is available, also report job count
+    if [[ -n "${CRONICLE_API_KEY:-}" ]]; then
+      local result
+      result=$(curl -sf --max-time 5 "${CRONICLE_URL}/api/app/get_schedule/v1?limit=1" \
+        -H "X-API-Key: ${CRONICLE_API_KEY}" 2>/dev/null) || return 0
+      local job_count
+      job_count=$(echo "$result" | jq -r '.list.length // 0')
+      echo "Jobs: ${job_count}"
+    fi
+    return 0
+  fi
+  echo "UNHEALTHY: Cannot reach Cronicle at ${CRONICLE_URL}" >&2
+  return 1
 }
 
 # ============================================================

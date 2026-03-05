@@ -338,7 +338,6 @@ case "${1:-help}" in
     ;;
   health)
     load_config
-    require_api_key
     shift; cmd_health "$@"
     ;;
   help|--help|-h) usage ;;
