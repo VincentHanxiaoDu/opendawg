@@ -43,6 +43,10 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
         const now = Date.now();
         const state = getState(sessionId);
 
+        // Reset finalizing guard for each new incoming text part so subsequent
+        // messages in the same session are not blocked by the previous idle cycle.
+        state.finalizing = false;
+
         // Always store the latest text and ctx so that finalizeTextMessage (called
         // from session.idle) can deliver the final answer even in quiet mode (verbosity=0).
         state.latestFullText = text;
