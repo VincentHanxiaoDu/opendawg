@@ -9,8 +9,18 @@
 *.token
 secrets/
 
-# User-specific config (use opendawg.yaml.example as template)
+# OpenDawg local state
+.opendawg/
+
+# Local config (use opendawg.yaml.example as template)
 opendawg.yaml
+config.json
+.opencode/opencode.json
+
+# Plugin development/scratch directories
+plugins/agent-browser/
+plugins/chrome-devtools/
+plugins/computer-use/
 
 # OS files
 .DS_Store
