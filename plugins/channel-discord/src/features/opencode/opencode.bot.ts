@@ -432,9 +432,9 @@ export class DiscordBot {
                 const session = this.opencodeService.getUserSession(userId)!;
                 await interaction.editReply(
                     `Switched to: **${session.session.title || "Untitled"}**\n` +
-                    `Agent: ${session.currentAgent || "build"} | Verbosity: ${session.verbosity}\n` +
-                    `Use \`/history\` to see recent messages`
+                    `Agent: ${session.currentAgent || "build"} | Verbosity: ${session.verbosity}`
                 );
+                await this.sendHistoryAfterSwitch(interaction, userId);
                 return;
             }
 
@@ -453,9 +453,9 @@ export class DiscordBot {
                 this.opencodeService.updateSessionContext(userId, interaction.channelId);
                 await interaction.editReply(
                     `Attached to: **${result.session.session.title || "Untitled"}**\n` +
-                    `Agent: ${result.session.currentAgent || "build"} | Verbosity: ${result.session.verbosity}\n` +
-                    `Use \`/history\` to see recent messages`
+                    `Agent: ${result.session.currentAgent || "build"} | Verbosity: ${result.session.verbosity}`
                 );
+                await this.sendHistoryAfterSwitch(interaction, userId);
             } catch (err: any) {
                 if (err?.message === "AMBIGUOUS" && err?.matches) {
                     const matchList = (err.matches as string[]).map((id: string) => `\`${id.substring(0, 8)}\``).join(", ");
@@ -542,14 +542,13 @@ export class DiscordBot {
 
         await interaction.deferReply({ ephemeral: true });
 
-        const history = await this.opencodeService.getSessionHistory(userId, n);
+        const session = this.opencodeService.getUserSession(userId)!;
+        const history = await this.opencodeService.getSessionHistory(userId, n, session.verbosity);
 
         if (history.length === 0) {
             await interaction.editReply('No messages yet in this session.');
             return;
         }
-
-        const session = this.opencodeService.getUserSession(userId)!;
         const title = session.session.title || "Untitled";
 
         // Send header as the deferred reply
@@ -948,6 +947,30 @@ export class DiscordBot {
         }
     }
 
+    /** Send the last 5 history messages after switching to a session */
+    private async sendHistoryAfterSwitch(interaction: ChatInputCommandInteraction | ButtonInteraction, userId: string): Promise<void> {
+        try {
+            const session = this.opencodeService.getUserSession(userId);
+            if (!session) return;
+            const history = await this.opencodeService.getSessionHistory(userId, 5, session.verbosity);
+            if (history.length === 0) return;
+            for (const msg of history) {
+                const prefix = msg.role === "user" ? "👤 **You**" : "🤖 **AI**";
+                const t = new Date(msg.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                const msgText = `${prefix} *${t}*\n${msg.text}`;
+                if (msgText.length > 1900) {
+                    const buf = Buffer.from(`[${msg.role === "user" ? "You" : "AI"}] ${new Date(msg.time * 1000).toLocaleTimeString()}\n${msg.text}`, "utf-8");
+                    const attachment = new AttachmentBuilder(buf, { name: `msg_${t.replace(":", "-")}.txt` });
+                    await interaction.followUp({ files: [attachment], ephemeral: true });
+                } else {
+                    await interaction.followUp({ content: msgText, ephemeral: true });
+                }
+            }
+        } catch {
+            // Non-fatal: history is best-effort
+        }
+    }
+
     private async handleSessionSwitchButton(interaction: ButtonInteraction): Promise<void> {
         const prefix = interaction.customId.slice(3);
         const userId = interaction.user.id;
@@ -989,6 +1012,7 @@ export class DiscordBot {
                 `Switched to: **${session.session.title || "Untitled"}**\n` +
                 `Agent: ${session.currentAgent || "build"} | Verbosity: ${session.verbosity}`
             );
+            await this.sendHistoryAfterSwitch(interaction, userId);
         } catch (error) {
             await interaction.editReply(ErrorUtils.createErrorMessage("switch session", error));
         }

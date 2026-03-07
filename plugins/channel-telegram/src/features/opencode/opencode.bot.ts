@@ -440,11 +440,11 @@ export class OpenCodeBot {
                 const m = await ctx.reply(
                     `✅ Switched to: <b>${escapeHtml(session.session.title || "Untitled")}</b>\n` +
                     `Agent: ${escapeHtml(session.currentAgent || "build")} | Verbosity: ${session.verbosity} | Stream: ${session.stream ? "on" : "off"}\n` +
-                    `Last active: ${timeAgo(session.session.time.updated)}\n` +
-                    `Use /history to see recent messages`,
+                    `Last active: ${timeAgo(session.session.time.updated)}`,
                     { parse_mode: "HTML" }
                 );
                 await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                await this.sendHistoryAfterSwitch(ctx, userId);
                 return;
             }
 
@@ -469,11 +469,11 @@ export class OpenCodeBot {
                 const m = await ctx.reply(
                     `✅ Attached to: <b>${escapeHtml(result.session.session.title || "Untitled")}</b>\n` +
                     `Agent: ${escapeHtml(result.session.currentAgent || "build")} | Verbosity: ${result.session.verbosity}\n` +
-                    `Last active: ${timeAgo(result.session.session.time.updated)}\n` +
-                    `Use /history to see recent messages`,
+                    `Last active: ${timeAgo(result.session.session.time.updated)}`,
                     { parse_mode: "HTML" }
                 );
                 await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+                await this.sendHistoryAfterSwitch(ctx, userId);
             } catch (err: any) {
                 if (err?.message === "AMBIGUOUS" && err?.matches) {
                     const matchList = (err.matches as string[]).map((id: string) => `<code>${id.substring(0, 8)}</code>`).join(", ");
@@ -502,15 +502,14 @@ export class OpenCodeBot {
             const nStr = text.replace("/history", "").trim();
             const n = nStr ? Math.min(Math.max(1, parseInt(nStr, 10) || 5), 20) : 5;
 
-            const history = await this.opencodeService.getSessionHistory(userId, n);
+            const session = this.opencodeService.getUserSession(userId)!;
+            const history = await this.opencodeService.getSessionHistory(userId, n, session.verbosity);
 
             if (history.length === 0) {
                 const m = await ctx.reply("📜 No messages yet in this session.");
                 await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
                 return;
             }
-
-            const session = this.opencodeService.getUserSession(userId)!;
             const title = escapeHtml(session.session.title || "Untitled");
             const timeout = this.configService.getMessageDeleteTimeout();
 
@@ -873,6 +872,33 @@ export class OpenCodeBot {
     // Inline button handlers for session/server lists
     // ─────────────────────────────────────────────
 
+    /** Send the last 5 history messages after switching to a session */
+    private async sendHistoryAfterSwitch(ctx: Context, userId: number): Promise<void> {
+        try {
+            const session = this.opencodeService.getUserSession(userId);
+            if (!session) return;
+            const history = await this.opencodeService.getSessionHistory(userId, 5, session.verbosity);
+            if (history.length === 0) return;
+            const timeout = this.configService.getMessageDeleteTimeout();
+            for (const msg of history) {
+                const prefix = msg.role === "user" ? "👤 <b>You</b>" : "🤖 <b>AI</b>";
+                const t = new Date(msg.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                const bodyHtml = escapeHtml(msg.text);
+                const msgText = `${prefix} <i>${t}</i>\n${bodyHtml}`;
+                let sent;
+                if (msgText.length > 4000) {
+                    const buf = Buffer.from(`[${msg.role === "user" ? "You" : "AI"}] ${new Date(msg.time * 1000).toLocaleTimeString()}\n${msg.text}`, "utf-8");
+                    sent = await ctx.replyWithDocument(new InputFile(buf, `msg_${t.replace(":", "-")}.txt`));
+                } else {
+                    sent = await ctx.reply(msgText, { parse_mode: "HTML" });
+                }
+                await MessageUtils.scheduleMessageDeletion(ctx, sent.message_id, timeout);
+            }
+        } catch {
+            // Non-fatal: history is best-effort
+        }
+    }
+
     /** Called when user taps a session switch button in /sessions list */
     private async handleSessionSwitchButton(ctx: Context, prefix: string): Promise<void> {
         try {
@@ -923,10 +949,11 @@ export class OpenCodeBot {
             const session = this.opencodeService.getUserSession(userId)!;
             const title = escapeHtml(session.session.title || "Untitled");
             const m = await ctx.reply(
-                `✅ Switched to: <b>${title}</b>\nAgent: ${escapeHtml(session.currentAgent || "build")} | Verbosity: ${session.verbosity}\nLast active: ${timeAgo(session.session.time.updated)}\nUse /history to see recent messages`,
+                `✅ Switched to: <b>${title}</b>\nAgent: ${escapeHtml(session.currentAgent || "build")} | Verbosity: ${session.verbosity}\nLast active: ${timeAgo(session.session.time.updated)}`,
                 { parse_mode: "HTML" }
             );
             await MessageUtils.scheduleMessageDeletion(ctx, m.message_id, this.configService.getMessageDeleteTimeout());
+            await this.sendHistoryAfterSwitch(ctx, userId);
         } catch (error) {
             await ctx.reply(ErrorUtils.createErrorMessage("switch session", error));
         }
@@ -1712,6 +1739,22 @@ export class OpenCodeBot {
             const message = ctx.message;
             if (!message) return;
 
+            const userId = ctx.from?.id;
+            if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
+
+            // Restore last session on first interaction after restart (same as text messages)
+            if (!this.opencodeService.hasActiveSession(userId)) {
+                const restored = await this.opencodeService.restoreLastSession(userId);
+                if (restored) {
+                    if (ctx.chat?.id) {
+                        this.opencodeService.updateSessionContext(userId, ctx.chat.id, ctx.message?.message_id ?? 0);
+                    }
+                    if (!this.opencodeService.hasEventStream(userId)) {
+                        await this.opencodeService.startEventStream(userId, ctx, true);
+                    }
+                }
+            }
+
             let fileId: string | undefined;
             let fileName: string | undefined;
             let fileType = "file";
@@ -1765,8 +1808,6 @@ export class OpenCodeBot {
 
             // ── STT path: transcribe voice/audio if voice provider is available ──
             if (isAudioType && this.voiceProvider) {
-                const userId = ctx.from?.id;
-                if (!userId) return;
 
                 await ctx.replyWithChatAction("typing");
                 try {
@@ -1842,8 +1883,6 @@ export class OpenCodeBot {
             console.log(`✓ File saved: ${savePath} (${fileType}, ${buffer.length} bytes)`);
 
             // Always forward uploaded files to the agent (with or without caption)
-            const userId = ctx.from?.id;
-            if (!userId) return;
             if (this.opencodeService.hasActiveSession(userId)) {
                 const caption = message.caption?.trim();
                 const promptText = caption

@@ -583,10 +583,11 @@ export class OpenCodeService {
     // Session history
     // ─────────────────────────────────────────────
 
-    async getSessionHistory(userId: number, limit = 5): Promise<Array<{ role: "user" | "assistant"; text: string; time: number }>> {
+    async getSessionHistory(userId: number, limit = 5, verbosity?: 0 | 1 | 2 | 3): Promise<Array<{ role: "user" | "assistant"; text: string; time: number }>> {
         const userSession = this.getUserSession(userId);
         if (!userSession) return [];
 
+        const effectiveVerbosity = verbosity ?? userSession.verbosity ?? 1;
         const client = this.createClientForUser(userId);
 
         try {
@@ -599,12 +600,46 @@ export class OpenCodeService {
 
             return result.data.map((msg: any) => {
                 const role: "user" | "assistant" = msg.info?.role === "user" ? "user" : "assistant";
-                // Extract text from parts
-                const textParts = (msg.parts ?? [])
+                const parts: any[] = msg.parts ?? [];
+
+                // Always extract text parts
+                const textParts = parts
                     .filter((p: any) => p.type === "text" && p.text)
                     .map((p: any) => p.text as string);
-                const text = textParts.join("").trim() || "(no text)";
-                return { role, text, time: msg.info?.time?.created ?? 0 };
+                let text = textParts.join("").trim();
+
+                // verbosity=0: truncate to 300 chars for a brief summary
+                if (effectiveVerbosity === 0 && text.length > 300) {
+                    text = text.slice(0, 300) + "…";
+                }
+
+                // verbosity>=2: append tool call info
+                if (effectiveVerbosity >= 2) {
+                    const toolLines: string[] = [];
+                    for (const p of parts) {
+                        if (p.type === "tool-invocation" || p.type === "tool-call") {
+                            const toolName = p.toolName ?? p.name ?? "tool";
+                            let line = `[tool: ${toolName}]`;
+                            if (p.state?.input ?? p.args) {
+                                const input = p.state?.input ?? p.args;
+                                const inputStr = typeof input === "string" ? input : JSON.stringify(input);
+                                line += ` in: ${inputStr.slice(0, 200)}`;
+                            }
+                            // verbosity>=3: also show output
+                            if (effectiveVerbosity >= 3 && (p.state?.output ?? p.result)) {
+                                const output = p.state?.output ?? p.result;
+                                const outputStr = typeof output === "string" ? output : JSON.stringify(output);
+                                line += ` → out: ${outputStr.slice(0, 300)}`;
+                            }
+                            toolLines.push(line);
+                        }
+                    }
+                    if (toolLines.length > 0) {
+                        text = (text ? text + "\n\n" : "") + toolLines.join("\n");
+                    }
+                }
+
+                return { role, text: text || "(no text)", time: msg.info?.time?.created ?? 0 };
             });
         } catch (error) {
             console.error(`Failed to get session history for user ${userId}:`, error);
