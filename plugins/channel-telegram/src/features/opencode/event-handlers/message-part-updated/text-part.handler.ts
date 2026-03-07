@@ -13,6 +13,7 @@ interface TextPartState {
     latestFullText: string;
     latestCtx: Context | null;
     isStreaming: boolean;
+    finalizing: boolean;
 }
 
 const sessionTextState = new Map<string, TextPartState>();
@@ -27,6 +28,7 @@ function getState(sessionId: string): TextPartState {
             latestFullText: "",
             latestCtx: null,
             isStreaming: true,
+            finalizing: false,
         };
         sessionTextState.set(sessionId, state);
     }
@@ -122,6 +124,10 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
 export async function finalizeTextMessage(sessionId: string, ctx?: Context): Promise<void> {
     const state = sessionTextState.get(sessionId);
     if (!state) return;
+
+    // Guard against concurrent session.idle events causing duplicate sends
+    if (state.finalizing) return;
+    state.finalizing = true;
 
     if (state.finalizeTimeout) {
         clearTimeout(state.finalizeTimeout);
