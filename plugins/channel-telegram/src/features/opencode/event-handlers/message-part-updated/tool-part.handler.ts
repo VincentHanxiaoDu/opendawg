@@ -117,6 +117,35 @@ export function resetQuestionState(sessionId: string): void {
     sessionQuestionMessageIds.delete(sessionId);
 }
 
+/**
+ * If the session has an active unanswered question, return the callID and qIdx
+ * of the most recently registered callback for that session.
+ * Used to treat free-text input as a "custom" answer even when the user never
+ * tapped the "✍️ Custom" button (e.g. if the question message was not rendered).
+ */
+export function getActiveQuestionCallId(sessionId: string): { callID: string; qIdx: number } | null {
+    if (!sessionQuestionMessageIds.has(sessionId)) return null;
+    // Find the most recently registered (highest nextQId) callback for this session
+    let best: { callID: string; qIdx: number; key: string } | null = null;
+    for (const [key, val] of questionCallbackMap.entries()) {
+        if (val.sessionID === sessionId && val.action !== "custom" && val.action !== "skip") {
+            if (!best || key > best.key) {
+                best = { callID: val.callID, qIdx: val.qIdx, key };
+            }
+        }
+    }
+    if (best) return { callID: best.callID, qIdx: best.qIdx };
+    // Fallback: if only custom/skip buttons exist, grab callID from any of them
+    for (const [key, val] of questionCallbackMap.entries()) {
+        if (val.sessionID === sessionId) {
+            if (!best || key > best.key) {
+                best = { callID: val.callID, qIdx: val.qIdx, key };
+            }
+        }
+    }
+    return best ? { callID: best.callID, qIdx: best.qIdx } : null;
+}
+
 export function cleanupToolState(sessionId: string): void {
     sessionToolMessages.delete(sessionId);
     sessionQuestionMessageIds.delete(sessionId);

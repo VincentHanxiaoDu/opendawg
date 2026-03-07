@@ -86,10 +86,45 @@ export class ServerRegistry {
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_servers_user ON servers(user_id);
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                user_id           TEXT PRIMARY KEY,
+                active_session_id TEXT NOT NULL,
+                updated_at        INTEGER NOT NULL
+            );
         `);
         // Migrate: add credential columns if they don't exist (safe for existing DBs)
         try { this.db.exec("ALTER TABLE servers ADD COLUMN username TEXT"); } catch { /* already exists */ }
         try { this.db.exec("ALTER TABLE servers ADD COLUMN password TEXT"); } catch { /* already exists */ }
+    }
+
+    // ── Session persistence ──────────────────────────────────────────────────
+
+    /** Persist the active session ID for a user (called on every session switch). */
+    saveActiveSession(userId: string, sessionId: string): void {
+        if (this.isMemoryMode || !this.db) return;
+        const now = Math.floor(Date.now() / 1000);
+        this.db.prepare(`
+            INSERT INTO user_sessions (user_id, active_session_id, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                active_session_id = excluded.active_session_id,
+                updated_at = excluded.updated_at
+        `).run(userId, sessionId, now);
+    }
+
+    /** Clear the persisted active session for a user (called on detach). */
+    clearActiveSession(userId: string): void {
+        if (this.isMemoryMode || !this.db) return;
+        this.db.prepare("DELETE FROM user_sessions WHERE user_id = ?").run(userId);
+    }
+
+    /** Get the last persisted active session ID for a user (used on restore after restart). */
+    getLastActiveSession(userId: string): string | null {
+        if (this.isMemoryMode || !this.db) return null;
+        const row = this.db.prepare(
+            "SELECT active_session_id FROM user_sessions WHERE user_id = ?"
+        ).get(userId) as { active_session_id: string } | undefined;
+        return row?.active_session_id ?? null;
     }
 
     // ── User defaults ────────────────────────────────────────────────────────

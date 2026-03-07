@@ -45,19 +45,34 @@ export class ServerRegistry {
             if (!fs.existsSync(dataDir)) {
                 fs.mkdirSync(dataDir, { recursive: true });
             }
-            // Test write access
-            const testFile = path.join(dataDir, ".write_test");
-            fs.writeFileSync(testFile, "");
-            fs.unlinkSync(testFile);
 
             // Load better-sqlite3 (CJS native module)
             const Database = _require("better-sqlite3") as typeof import("better-sqlite3");
             this.db = new Database(this.dbPath);
+
+            // Enable WAL mode: allows concurrent readers + one writer, prevents
+            // "attempt to write a readonly database" when a second process opens
+            // the same DB file (e.g. during container restart overlap).
+            this.db.pragma("journal_mode = WAL");
+            // Reduce fsync overhead; safe for this use-case (non-critical metadata).
+            this.db.pragma("synchronous = NORMAL");
+
+            // Verify we actually have write access to the DB itself (not just the dir).
+            // better-sqlite3 can open a file in read-only mode if another process holds
+            // an exclusive lock; catching that here lets us fall back to memory mode
+            // gracefully instead of crashing on the first real write.
+            this.db.exec("CREATE TABLE IF NOT EXISTS _write_probe (x INTEGER)");
+            this.db.exec("DROP TABLE IF EXISTS _write_probe");
+
             this.createSchema();
-            console.log(`[ServerRegistry] SQLite DB at ${this.dbPath}`);
+            console.log(`[ServerRegistry] SQLite DB at ${this.dbPath} (WAL mode)`);
         } catch (err) {
             console.warn(`[ServerRegistry] Cannot open SQLite DB (${err}), using in-memory mode`);
             this.isMemoryMode = true;
+            if (this.db) {
+                try { this.db.close(); } catch {}
+                this.db = null;
+            }
         }
     }
 
@@ -73,10 +88,39 @@ export class ServerRegistry {
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_servers_user ON servers(user_id);
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                user_id           INTEGER PRIMARY KEY,
+                active_session_id TEXT NOT NULL,
+                updated_at        INTEGER NOT NULL
+            );
         `);
         // Migrate: add credential columns if they don't exist (safe for existing DBs)
         try { this.db.exec("ALTER TABLE servers ADD COLUMN username TEXT"); } catch {}
         try { this.db.exec("ALTER TABLE servers ADD COLUMN password TEXT"); } catch {}
+    }
+
+    /** Persist the active session ID for a user (called on every session switch) */
+    saveActiveSession(userId: number, sessionId: string): void {
+        if (this.isMemoryMode || !this.db) return;
+        const now = Math.floor(Date.now() / 1000);
+        this.db.prepare(`
+            INSERT INTO user_sessions (user_id, active_session_id, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET active_session_id = excluded.active_session_id, updated_at = excluded.updated_at
+        `).run(userId, sessionId, now);
+    }
+
+    /** Clear the persisted active session for a user (called on detach) */
+    clearActiveSession(userId: number): void {
+        if (this.isMemoryMode || !this.db) return;
+        this.db.prepare("DELETE FROM user_sessions WHERE user_id = ?").run(userId);
+    }
+
+    /** Get the last persisted active session ID for a user */
+    getLastActiveSession(userId: number): string | null {
+        if (this.isMemoryMode || !this.db) return null;
+        const row = this.db.prepare("SELECT active_session_id FROM user_sessions WHERE user_id = ?").get(userId) as { active_session_id: string } | undefined;
+        return row?.active_session_id ?? null;
     }
 
     /** Ensure user has at least one server record (from env defaults if first time) */

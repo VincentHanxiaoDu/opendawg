@@ -75,6 +75,15 @@ export class DiscordBot {
                     sttModel: configService.getVoiceSttModel(),
                     ttsModel: configService.getVoiceTtsModel(),
                     ttsVoice: configService.getVoiceTtsVoice(),
+                    azureApiKey: process.env.AZURE_OPENAI_API_KEY,
+                    azureEndpoint: process.env.AZURE_OPENAI_ENDPOINT,
+                    azureApiVersion: process.env.AZURE_OPENAI_API_VERSION,
+                    azureSttDeployment: process.env.AZURE_VOICE_STT_DEPLOYMENT,
+                    azureTtsDeployment: process.env.AZURE_VOICE_TTS_DEPLOYMENT,
+                    azureSpeechApiKey: process.env.AZURE_SPEECH_API_KEY || process.env.AZURE_OPENAI_API_KEY,
+                    azureSpeechRegion: process.env.AZURE_SPEECH_REGION,
+                    azureSpeechVoice: process.env.AZURE_SPEECH_VOICE,
+                    azureSpeechLanguage: process.env.AZURE_SPEECH_LANGUAGE,
                 });
                 // Register with event handlers for TTS delivery
                 setIdleVoiceProvider(this.voiceProvider);
@@ -1111,8 +1120,25 @@ export class DiscordBot {
         const text = message.content;
 
         if (!this.opencodeService.hasActiveSession(userId)) {
-            await message.reply('No active session. Use `/opencode` to start one.');
-            return;
+            // Try to restore last active session from persistent storage
+            const restored = await this.opencodeService.restoreLastSession(userId);
+            if (restored) {
+                await message.reply(
+                    `✅ Restored session: **${restored.session.title || restored.sessionId}**\n` +
+                    `Agent: ${restored.currentAgent} | Verbosity: ${restored.verbosity} | Stream: ${restored.stream ? "on" : "off"}\n` +
+                    `Use \`/history\` to see recent messages`
+                );
+                // Store channelId so background session notifications work too.
+                this.opencodeService.updateSessionContext(userId, message.channelId, message.id);
+                // Resume SSE event stream. Use waitForConnect=true so the prompt is only
+                // sent after the stream is ready and events won't be missed.
+                if (!this.opencodeService.hasEventStream(userId)) {
+                    await this.opencodeService.startEventStream(userId, message.client, true);
+                }
+            } else {
+                await message.reply('No active session. Use `/opencode` to start one.');
+                return;
+            }
         }
 
         // Update session context to this channel

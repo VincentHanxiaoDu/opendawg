@@ -8,7 +8,7 @@ import { MessageUtils } from "../../utils/message.utils.js";
 import { ErrorUtils } from "../../utils/error.utils.js";
 import { formatAsHtml, escapeHtml, startTypingIndicator, stopTypingIndicator } from "./event-handlers/utils.js";
 import { FileMentionService, FileMentionUI } from "../file-mentions/index.js";
-import { resetQuestionState, getQuestionCallback } from "./event-handlers/message-part-updated/tool-part.handler.js";
+import { resetQuestionState, getQuestionCallback, getActiveQuestionCallId } from "./event-handlers/message-part-updated/tool-part.handler.js";
 import { getPermissionCallback } from "./event-handlers/permission.updated.handler.js";
 import {
     buildPageKeyboard, parsePageCallback, parseJumpCallback,
@@ -1197,8 +1197,29 @@ export class OpenCodeBot {
             if (!userId) { await ctx.reply("❌ Unable to identify user"); return; }
 
             if (!this.opencodeService.hasActiveSession(userId)) {
-                await ctx.reply("❌ No active OpenCode session. Use /opencode to start a session first.");
-                return;
+                // Try to restore last active session from persistent storage
+                const restored = await this.opencodeService.restoreLastSession(userId);
+                if (restored) {
+                    await ctx.reply(
+                        `✅ Restored session: <b>${escapeHtml(restored.session.title || restored.sessionId)}</b>\nAgent: ${restored.currentAgent} | Verbosity: ${restored.verbosity} | Stream: ${restored.stream ? "on" : "off"}\nUse /history to see recent messages`,
+                        { parse_mode: "HTML" }
+                    );
+                    // Store chatId so background session notifications work too.
+                    if (ctx.chat?.id && ctx.message?.message_id) {
+                        this.opencodeService.updateSessionContext(userId, ctx.chat.id, ctx.message.message_id);
+                    }
+                    // Resume SSE event stream so responses come back to Telegram.
+                    // After a bot restart the stream is gone — restart it now.
+                    // Use waitForConnect=true so we await the connection before
+                    // falling through to sendPromptToOpenCode; otherwise the prompt
+                    // fires before the stream is ready and the AI reply events are missed.
+                    if (!this.opencodeService.hasEventStream(userId)) {
+                        await this.opencodeService.startEventStream(userId, ctx, true);
+                    }
+                } else {
+                    await ctx.reply("❌ No active OpenCode session. Use /opencode to start a session first.");
+                    return;
+                }
             }
 
             let promptText = ctx.message?.text?.trim() || "";
@@ -1227,6 +1248,37 @@ export class OpenCodeBot {
                     await ctx.reply("❌ Failed to send answer");
                 }
                 return;
+            }
+
+            // Fallback: if this session has an active unanswered question (question message
+            // was displayed but user never tapped a button — e.g. inline keyboard wasn't
+            // rendered on their client), treat any free-text input as a custom answer.
+            // This unblocks the AI session without requiring button interaction.
+            const userSession = this.opencodeService.getUserSession(userId);
+            if (userSession?.sessionId) {
+                const activeQ = getActiveQuestionCallId(userSession.sessionId);
+                if (activeQ) {
+                    try {
+                        const baseUrl = process.env.OPENCODE_SERVER_URL || "http://localhost:4096";
+                        const res = await fetch(`${baseUrl}/question/${activeQ.callID}/reply`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ answers: [[promptText]] }),
+                        });
+                        if (res.ok) {
+                            resetQuestionState(userSession.sessionId);
+                            await ctx.reply(`✅ Answer sent: <b>${escapeHtml(promptText)}</b>`, { parse_mode: "HTML" });
+                        } else {
+                            // Question reply failed (already answered / expired) — fall through to normal prompt
+                            resetQuestionState(userSession.sessionId);
+                            await this.sendPromptToOpenCode(ctx, userId, promptText);
+                        }
+                    } catch {
+                        resetQuestionState(userSession.sessionId);
+                        await ctx.reply("❌ Failed to send answer");
+                    }
+                    return;
+                }
             }
 
             if (promptText.startsWith("/")) {

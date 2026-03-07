@@ -34,6 +34,10 @@ export class ConfigService {
     private readonly voiceTtsVoice: string;
     private readonly voiceEnabled: boolean;
 
+    // Session Defaults
+    private readonly defaultVerbosity: 0 | 1 | 2 | 3;
+    private readonly defaultStream: boolean;
+
     constructor() {
         // Load and parse Telegram bot tokens
         this.telegramBotTokens = (process.env.TELEGRAM_BOT_TOKENS || '')
@@ -91,6 +95,12 @@ export class ConfigService {
             process.env.GOOGLE_APPLICATION_CREDENTIALS
         );
         this.voiceEnabled = hasApiKey;
+
+        // Load session defaults
+        const verbosityRaw = parseInt(process.env.DEFAULT_VERBOSITY ?? '0', 10);
+        this.defaultVerbosity = ([0, 1, 2, 3].includes(verbosityRaw) ? verbosityRaw : 0) as 0 | 1 | 2 | 3;
+        const streamRaw = process.env.DEFAULT_STREAM?.toLowerCase();
+        this.defaultStream = streamRaw === undefined ? true : (streamRaw === 'true' || streamRaw === '1');
     }
 
     private parseDefaultServers(): DefaultServer[] {
@@ -205,6 +215,14 @@ export class ConfigService {
 
     isVoiceEnabled(): boolean {
         return this.voiceEnabled;
+    }
+
+    getDefaultVerbosity(): 0 | 1 | 2 | 3 {
+        return this.defaultVerbosity;
+    }
+
+    getDefaultStream(): boolean {
+        return this.defaultStream;
     }
 
     // Debug information

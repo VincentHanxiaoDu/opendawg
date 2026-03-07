@@ -22,6 +22,7 @@ export {
     splitForTts,
     OpenAIVoiceProvider,
     AzureVoiceProvider,
+    AzureSpeechVoiceProvider,
     GoogleVoiceProvider,
     type VoiceProvider,
     type VoiceProviderConfig,

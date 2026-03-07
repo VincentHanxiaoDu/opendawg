@@ -43,6 +43,26 @@ export class OpenCodeService {
         return this.userStates.get(userId)!;
     }
 
+    /** Restore the last active session from DB after a restart. Call once per user on first interaction. */
+    async restoreLastSession(userId: number): Promise<UserSession | null> {
+        const lastSessionId = this.serverRegistry?.getLastActiveSession(userId);
+        if (!lastSessionId) return null;
+
+        // Already restored
+        const state = this.userStates.get(userId);
+        if (state?.activeSessionId) return this.getUserSession(userId) ?? null;
+
+        try {
+            const attached = await this.attachSession(userId, lastSessionId);
+            if (!attached) return null;
+            this.switchSession(userId, attached.session.sessionId);
+            console.log(`[Session] Restored last active session ${lastSessionId} for user ${userId}`);
+            return attached.session;
+        } catch {
+            return null;
+        }
+    }
+
     getServerUrl(userId: number): string {
         return this.getBaseUrl(userId);
     }
@@ -137,8 +157,8 @@ export class OpenCodeService {
                 session: result.data,
                 createdAt: new Date(),
                 currentAgent: "build",
-                verbosity: 1,
-                stream: true,
+                verbosity: (([0,1,2,3].includes(parseInt(process.env.DEFAULT_VERBOSITY??'0',10)) ? parseInt(process.env.DEFAULT_VERBOSITY??'0',10) : 0) as 0|1|2|3),
+                stream: process.env.DEFAULT_STREAM === undefined ? true : (process.env.DEFAULT_STREAM.toLowerCase() === 'true' || process.env.DEFAULT_STREAM === '1'),
                 isActive: true,
                 serverStatus: "idle",
                 serverUrl: this.getBaseUrl(userId),
@@ -149,6 +169,7 @@ export class OpenCodeService {
 
             state.sessions.set(result.data.id, userSession);
             state.activeSessionId = result.data.id;
+            this.serverRegistry?.saveActiveSession(userId, result.data.id);
 
             return userSession;
         } catch (error) {
@@ -205,8 +226,8 @@ export class OpenCodeService {
                 session: result.data,
                 createdAt: new Date(),
                 currentAgent: defaultSession?.currentAgent ?? "build",
-                verbosity: defaultSession?.verbosity ?? 1,
-                stream: defaultSession?.stream ?? true,
+                verbosity: defaultSession?.verbosity ?? (([0,1,2,3].includes(parseInt(process.env.DEFAULT_VERBOSITY??'0',10)) ? parseInt(process.env.DEFAULT_VERBOSITY??'0',10) : 0) as 0|1|2|3),
+                stream: defaultSession?.stream ?? (process.env.DEFAULT_STREAM === undefined ? true : (process.env.DEFAULT_STREAM.toLowerCase() === 'true' || process.env.DEFAULT_STREAM === '1')),
                 isActive: false,
                 serverStatus: "idle",
                 ttsEnabled: defaultSession?.ttsEnabled ?? false,
@@ -246,6 +267,7 @@ export class OpenCodeService {
         }
         target.isActive = true;
         state.activeSessionId = targetId;
+        this.serverRegistry?.saveActiveSession(userId, targetId);
         return true;
     }
 
@@ -256,6 +278,7 @@ export class OpenCodeService {
         const session = state.sessions.get(state.activeSessionId);
         if (session) session.isActive = false;
         state.activeSessionId = null;
+        this.serverRegistry?.clearActiveSession(userId);
         return session ?? null;
     }
 
@@ -338,55 +361,87 @@ export class OpenCodeService {
     // SSE event stream
     // ─────────────────────────────────────────────
 
-    async startEventStream(userId: number, ctx: Context): Promise<void> {
+    /**
+     * Start the SSE event stream for a user.
+     * Returns a Promise that resolves once the connection is established (or fails).
+     * The stream loop itself runs indefinitely in the background.
+     *
+     * Pass `waitForConnect = true` (default false) to get a Promise that resolves
+     * after the first successful `client.event.subscribe()` call, so callers can
+     * send prompts only after the stream is ready to receive events.
+     */
+    startEventStream(userId: number, ctx: Context, waitForConnect = false): Promise<void> {
         const state = this.userStates.get(userId);
-        if (!state) return;
+        if (!state) return Promise.resolve();
 
         this.stopEventStream(userId);
 
         const abortController = new AbortController();
         this.eventAbortControllers.set(userId, abortController);
 
-        const MAX_RETRIES = 10;
-        const BASE_DELAY_MS = 1000;
-        let retries = 0;
+        let connectedResolve: (() => void) | null = null;
+        const connectedPromise = waitForConnect
+            ? new Promise<void>(resolve => { connectedResolve = resolve; })
+            : Promise.resolve();
 
-        while (!abortController.signal.aborted) {
-            try {
-                const client = this.createClientForUser(userId);
-                const events = await client.event.subscribe();
+        const run = async () => {
+            const MAX_RETRIES = 10;
+            const BASE_DELAY_MS = 1000;
+            let retries = 0;
+            let notifiedConnected = false;
 
-                retries = 0;
+            while (!abortController.signal.aborted) {
+                try {
+                    const client = this.createClientForUser(userId);
+                    const events = await client.event.subscribe();
 
-                for await (const event of events.stream) {
+                    retries = 0;
+
+                    // Signal to the caller that the stream is connected and ready
+                    if (!notifiedConnected) {
+                        notifiedConnected = true;
+                        connectedResolve?.();
+                    }
+
+                    for await (const event of events.stream) {
+                        if (abortController.signal.aborted) break;
+                        const currentState = this.userStates.get(userId);
+                        if (currentState) {
+                            await processEvent(event, ctx, currentState, globalMessageDeleteTimeout);
+                        }
+                    }
+
                     if (abortController.signal.aborted) break;
-                    const currentState = this.userStates.get(userId);
-                    if (currentState) {
-                        await processEvent(event, ctx, currentState, globalMessageDeleteTimeout);
+                } catch (error) {
+                    if (abortController.signal.aborted) break;
+                    console.error(`Event stream error (retry ${retries + 1}/${MAX_RETRIES}):`, error);
+                    // If we never connected, unblock the caller so it doesn't hang
+                    if (!notifiedConnected) {
+                        notifiedConnected = true;
+                        connectedResolve?.();
                     }
                 }
 
-                if (abortController.signal.aborted) break;
-            } catch (error) {
-                if (abortController.signal.aborted) break;
-                console.error(`Event stream error (retry ${retries + 1}/${MAX_RETRIES}):`, error);
+                retries++;
+                if (retries > MAX_RETRIES) {
+                    console.error(`Event stream: giving up after ${MAX_RETRIES} retries for user ${userId}`);
+                    break;
+                }
+
+                const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retries - 1), 30000);
+                await new Promise<void>(resolve => {
+                    const timer = setTimeout(resolve, delay);
+                    const onAbort = () => { clearTimeout(timer); resolve(); };
+                    abortController.signal.addEventListener("abort", onAbort, { once: true });
+                });
             }
 
-            retries++;
-            if (retries > MAX_RETRIES) {
-                console.error(`Event stream: giving up after ${MAX_RETRIES} retries for user ${userId}`);
-                break;
-            }
+            this.eventAbortControllers.delete(userId);
+        };
 
-            const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retries - 1), 30000);
-            await new Promise<void>(resolve => {
-                const timer = setTimeout(resolve, delay);
-                const onAbort = () => { clearTimeout(timer); resolve(); };
-                abortController.signal.addEventListener("abort", onAbort, { once: true });
-            });
-        }
+        run().catch((err: unknown) => console.error("[SSE] Unexpected stream error:", err));
 
-        this.eventAbortControllers.delete(userId);
+        return connectedPromise;
     }
 
     hasEventStream(userId: number): boolean {

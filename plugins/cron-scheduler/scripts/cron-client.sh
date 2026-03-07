@@ -95,7 +95,7 @@ cmd_install() {
       tar xz --strip-components=1 -C "$WORKER_HOME"
 
     echo "[cron-client] Installing dependencies..."
-    (cd "$WORKER_HOME" && npm install --production 2>&1 | tail -1)
+    (cd "$WORKER_HOME" && npm install --production --ignore-scripts 2>&1 | tail -1)
 
     echo "[cron-client] Building Cronicle..."
     (cd "$WORKER_HOME" && node bin/build.js dist 2>&1 | tail -1)

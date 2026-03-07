@@ -41,13 +41,8 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
         const now = Date.now();
         const state = getState(sessionId);
 
-        if (verbosity < 1) return;
-
-        if (state.finalizeTimeout) {
-            clearTimeout(state.finalizeTimeout);
-            state.finalizeTimeout = null;
-        }
-
+        // Always store the latest text and ctx so that finalizeTextMessage (called
+        // from session.idle) can deliver the final answer even in quiet mode (verbosity=0).
         state.latestFullText = text;
         state.latestCtx = ctx;
         state.isStreaming = stream;
@@ -55,6 +50,15 @@ export async function handleTextPart(ctx: Context, text: string, userSession: Us
         // Accumulate for TTS (always keep latest full text)
         if (userSession.ttsEnabled) {
             userSession.pendingTtsText = text;
+        }
+
+        // Skip streaming previews at verbosity=0, but text is already stored above
+        // so the final message will still be delivered when session.idle fires.
+        if (verbosity < 1) return;
+
+        if (state.finalizeTimeout) {
+            clearTimeout(state.finalizeTimeout);
+            state.finalizeTimeout = null;
         }
 
         if (!stream) {

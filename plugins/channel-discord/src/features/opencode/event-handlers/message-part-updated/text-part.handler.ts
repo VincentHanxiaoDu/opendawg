@@ -41,17 +41,24 @@ export async function handleTextPart(
     try {
         const sessionId = userSession.sessionId;
         const stream = userSession.stream ?? true;
+        const verbosity = userSession.verbosity ?? 1;
         const now = Date.now();
         const state = getState(sessionId);
+
+        // Always store the latest text so that finalizeTextMessage (called from
+        // session.idle) can deliver the final answer even in quiet mode (verbosity=0).
+        state.latestFullText = text;
+        state.latestChannelId = userSession.channelId ?? null;
+        state.isStreaming = stream;
+
+        // Skip streaming previews at verbosity=0, but text is already stored above
+        // so the final message will still be delivered when session.idle fires.
+        if (verbosity < 1) return;
 
         if (state.finalizeTimeout) {
             clearTimeout(state.finalizeTimeout);
             state.finalizeTimeout = null;
         }
-
-        state.latestFullText = text;
-        state.latestChannelId = userSession.channelId ?? null;
-        state.isStreaming = stream;
 
         if (!stream) {
             state.finalizeTimeout = setTimeout(() => {
