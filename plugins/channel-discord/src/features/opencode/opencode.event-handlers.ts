@@ -212,42 +212,21 @@ async function handlePermissionAsked(
     client: Client,
     userSession: UserSession
 ): Promise<string | null> {
-    // Permission handling is done via the bot's interaction handler
-    // This handler stores the event data for the button handler to use
+    // Auto-approve all permissions (yolo mode)
     const props = (event as any).properties;
-    if (!props || !userSession.channelId) return null;
+    const permId = props?.info?.id || props?.id || "";
+    if (!permId) return null;
 
-    const channel = await resolveChannel(client, userSession.channelId);
-    if (!channel) return null;
-
-    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import("discord.js");
-
-    const title = props.info?.title || props.title || "Permission Request";
-    const description = props.info?.description || props.description || "";
-
-    const permId = props.info?.id || props.id || "";
-    const sessionID = userSession.sessionId;
-
-    // Store permission data for callback resolution
-    storePermissionData(permId, sessionID);
-
-    const row = new ActionRowBuilder<typeof ButtonBuilder.prototype>().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`perm:${permId}:allow`)
-            .setLabel("Allow Once")
-            .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId(`perm:${permId}:always`)
-            .setLabel("Always Allow")
-            .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-            .setCustomId(`perm:${permId}:deny`)
-            .setLabel("Deny")
-            .setStyle(ButtonStyle.Danger),
-    );
-
-    const text = `**Permission Request**\n${title}${description ? '\n' + description : ''}`;
-    await channel.send({ content: text, components: [row as any] });
+    try {
+        const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
+        const clientOC = createOpencodeClient({
+            baseUrl: process.env.OPENCODE_SERVER_URL || "http://localhost:4096",
+        });
+        await clientOC.permission.reply({ requestID: permId, reply: "always" });
+        console.log(`[Permission] Auto-approved: ${props?.info?.title || props?.title || permId}`);
+    } catch (err) {
+        console.error("[Permission] Auto-approve failed:", err);
+    }
 
     return null;
 }

@@ -1,31 +1,18 @@
 import type { Event } from "@opencode-ai/sdk/v2";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import type { Context } from "grammy";
 import type { UserSession } from "../opencode.types.js";
-import { escapeHtml } from "./utils.js";
 
 // v2 uses "permission.asked" instead of "permission.updated"
 type PermissionUpdatedEvent = Extract<Event, { type: "permission.updated" }> | Extract<Event, { type: "permission.asked" }>;
 
-// Short ID counter for callback_data (Telegram 64-byte limit)
-let nextPermId = 0;
-const permCallbackMap = new Map<string, { sessionID: string; permissionID: string; reply: string }>();
-
-export function getPermissionCallback(shortId: string) {
-    return permCallbackMap.get(shortId);
+// Kept for backwards compat (bot.ts imports this) — always returns undefined now
+export function getPermissionCallback(_shortId: string) {
+    return undefined;
 }
 
-export function cleanupPermissionCallbacks(sessionId: string): void {
-    for (const [key, val] of permCallbackMap.entries()) {
-        if (val.sessionID === sessionId) {
-            permCallbackMap.delete(key);
-        }
-    }
-}
-
-function makePermCallback(sessionID: string, permissionID: string, reply: string): string {
-    const id = `p${nextPermId++}`;
-    permCallbackMap.set(id, { sessionID, permissionID, reply });
-    return id;
+export function cleanupPermissionCallbacks(_sessionId: string): void {
+    // no-op: no callbacks stored in yolo mode
 }
 
 export default async function permissionUpdatedHandler(
@@ -35,40 +22,20 @@ export default async function permissionUpdatedHandler(
 ): Promise<string | null> {
     try {
         const permission = event.properties as Record<string, any>;
-        const title = permission.title || "Permission request";
         const permissionId = permission.id;
-        const sessionId = permission.sessionID;
 
-        let details = "";
-        if (permission.metadata) {
-            const meta = permission.metadata as Record<string, unknown>;
-            if (meta.tool) details += `\nTool: <code>${escapeHtml(String(meta.tool))}</code>`;
-            if (meta.command) details += `\nCommand: <code>${escapeHtml(String(meta.command))}</code>`;
-            if (meta.path) details += `\nPath: <code>${escapeHtml(String(meta.path))}</code>`;
-            if (meta.description) details += `\n${escapeHtml(String(meta.description))}`;
-        }
-
-        const patterns = permission.patterns || permission.pattern;
-        if (patterns) {
-            const patternList = Array.isArray(patterns) ? patterns : [patterns];
-            details += `\nPattern: <code>${escapeHtml(patternList.join(", "))}</code>`;
-        }
-
-        const message = `🔐 <b>${escapeHtml(title)}</b>${details}`;
-
-        // Send with approve/reject buttons using short callback IDs
-        await ctx.reply(message, {
-            parse_mode: "HTML",
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: "✅ Allow Once", callback_data: makePermCallback(sessionId, permissionId, "once") },
-                        { text: "✅ Always", callback_data: makePermCallback(sessionId, permissionId, "always") },
-                        { text: "❌ Deny", callback_data: makePermCallback(sessionId, permissionId, "reject") },
-                    ]
-                ]
-            }
+        // Auto-approve all permissions (yolo mode)
+        const client = createOpencodeClient({
+            baseUrl: userSession.serverUrl || process.env.OPENCODE_SERVER_URL || "http://localhost:4096",
+            ...(userSession.authHeader ? { headers: { Authorization: userSession.authHeader } } : {}),
         });
+
+        await client.permission.reply({
+            requestID: permissionId,
+            reply: "always",
+        });
+
+        console.log(`[Permission] Auto-approved: ${permission.title || permissionId}`);
     } catch (error) {
         console.error("Error in permission.updated handler:", error);
     }
